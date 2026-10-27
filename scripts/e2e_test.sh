@@ -247,4 +247,84 @@ d=json.load(sys.stdin)
 for m in d: print(f\"  • {m['label']} ({m['name']}) | تجمیع: {m['aggregation']} | جدول: {'دارد' if m['datasetId'] else '—'}\")"
 
 echo ""
+echo "═══ ۲۱) جدول محوری — بخش ۱۹.۲ ═══"
+echo "── ۲۱.۱) سلسله‌مراتب دو سطحی: استان ← شهرستان با جمع جزء و جمع کل ──"
+$CURL -X POST "$BASE/datasets/$DSID/pivot" -H 'Content-Type: application/json' -d "{\"rowDims\":[\"$F_PROV\",\"$F_CITY\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"},{\"fieldId\":\"$F_CNT\",\"agg\":\"count\",\"alias\":\"تعداد رکورد\"}],\"showShare\":true,\"showRank\":true,\"subtotals\":true}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('ستون‌ها:', d['colKeys'], '| سنجه‌ها:', d['measureAliases'])
+for r in d['rows']:
+    indent='  '*(r['depth']+1) if not r['isSubtotal'] else '  '
+    tag='【جمع جزء】' if r['isSubtotal'] else ''
+    print(f\"{indent}{tag}{r['dimValues'][-1]['value']} | جمع مبلغ: {r['rowTotals'].get('جمع مبلغ')} | رتبه: {r.get('rank','-')} | سهم: {round(r.get('share',0),1)}٪\")
+gt=d['grandTotals'].get('جمع مبلغ')
+print('جمع کل:', gt, '| رکورد بررسی‌شده:', d['scannedRecords'])
+assert gt == 2035500000, f'جمع کل جدول محوری با انتظار سند مطابقت ندارد: {gt}'
+print('✓ جمع کل = ۲٬۰۳۵٬۵۰۰٬۰۰۰ ریال (مطابق ۱۴.۴)')"
+
+echo "── ۲۱.۲) بُعد ستون: شهرستان در ستون‌ها ──"
+$CURL -X POST "$BASE/datasets/$DSID/pivot" -H 'Content-Type: application/json' -d "{\"rowDims\":[\"$F_PROV\"],\"colDim\":\"$F_CITY\",\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"}],\"subtotals\":false}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('کلیدهای ستون:', d['colKeys'])
+for r in d['rows']:
+    print(' ', r['dimValues'][-1]['value'], '→', {k.split('||')[0]: v for k,v in r['cells'].items()})
+print('هشدارها:', d['warnings'])"
+
+echo ""
+echo "═══ ۲۲) Drill Through جزئیات رکورد — بخش ۱۹.۳ ═══"
+FILTERS=$(python3 -c "import json; print(json.dumps([{'fieldId':'$F_PROV','op':'eq','value':'تهران'}], ensure_ascii=False))")
+FILT_ENC=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$FILTERS")
+$CURL "$BASE/datasets/$DSID/records?limit=50&filters=$FILT_ENC" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+vals=set(str(r.get('$F_PROV')) for r in d['rows'])
+print('رکوردهای مطابق:', d['total'], '| مقادیر استان:', vals)
+assert d['total'] > 0 and vals == {'تهران'}, 'فیلتر Drill Through درست کار نمی‌کند'
+print('✓ فیلتر Drill Through فقط رکوردهای تهران را برگرداند (۱۹.۳)')"
+
+echo ""
+echo "═══ ۲۳) به‌روزرسانی فایل و Upsert — بخش ۲۴ ═══"
+echo "── ۲۳.۱) Upsert بر اساس «کد شعبه»: مقادیر تغییر یافته + دو شعبه جدید ──"
+$CURL -X POST "$BASE/datasets/$DSID/upsert" -F "file=@/home/z/my-project/upload/فروش-به‌روزرسانی.xlsx" -F "mode=upsert" -F "keyFieldIds=[\"$F_BRANCH\"]" | tee /tmp/upsert1.json | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('درج:', d['inserted'], '| به‌روزرسانی:', d['updated'], '| بدون تغییر:', d['unchanged'], '| کل:', d['rowCount'], '| نسخه:', d['version'])
+assert d['inserted'] == 2, 'انتظار دو شعبه جدید برآورده نشد'
+assert d['updated'] >= 4, 'به‌روزرسانی مقادیر کلیدهای موجود ثبت نشد'
+assert d['version'] > 1, 'نسخه داده افزایش نیافت (۲۴.۳)'
+print('✓ Upsert صحیح: درج ۲ رکورد جدید و به‌روزرسانی موجودها؛ نسخه داده افزایش یافت')"
+V1=$(python3 -c "import json; print(json.load(open('/tmp/upsert1.json'))['version'])")
+
+echo "── ۲۳.۲) کنترل تغییر ساختار: ستون اضافه «توضیحات» → توقف و درخواست تأیید (۲۴.۲) ──"
+DIFF=$($CURL -X POST "$BASE/datasets/$DSID/upsert" -F "file=@/home/z/my-project/upload/فروش-ساختار-تغییر.xlsx" -F "mode=append" -F "keyFieldIds=[\"$F_BRANCH\"]")
+echo "$DIFF" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d.get('requiresConfirmation') == True, 'تغییر ساختار شناسایی نشد'
+kinds=[c['kind'] for c in d['structureChanges']]
+print('تغییرها:', kinds, '| گزارش منتشرشده وابسته:', d['publishedReports'])
+print('پیام:', d['message'][:90])
+assert 'added' in kinds, 'ستون اضافه‌شده تشخیص داده نشد'
+print('✓ به‌روزرسانی متوقف و تأیید مدیر درخواست شد (۲۴.۲)')"
+
+echo "── ۲۳.۳) تأیید مدیر و اعمال تغییر ساختار ──"
+$CURL -X POST "$BASE/datasets/$DSID/upsert" -F "file=@/home/z/my-project/upload/فروش-ساختار-تغییر.xlsx" -F "mode=replace" -F "confirmStructureChange=true" | python3 -c "
+import json,sys
+v1 = int(sys.argv[1])
+d=json.load(sys.stdin)
+print('روش: جایگزینی کامل | ستون‌های جدید:', d['addedFields'], '| ستون:', d['fieldCount'], '| نسخه:', d['version'])
+assert d['addedFields'] == ['توضیحات'], 'ستون جدید به مدل اضافه نشد'
+assert d['version'] == v1 + 1, 'نسخه پس از تغییر ساختار افزایش نیافت'
+print('✓ تغییر ساختار با تأیید مدیر اعمال شد؛ فایل خام جدید ثبت و نسخه افزایش یافت')" "$V1"
+
+echo "── ۲۳.۴) فایل یکسان: پذیرفته نمی‌شود (اثر انگشت — ۷.۱) ──"
+$CURL -X POST "$BASE/datasets/$DSID/upsert" -F "file=@/home/z/my-project/upload/فروش-ساختار-تغییر.xlsx" -F "mode=replace" -F "confirmStructureChange=true" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('پیام:', d.get('error','')[:80])
+assert 'یکسان' in d.get('error',''), 'تشخیص فایل تکراری کار نمی‌کند'
+print('✓ فایل با اثر انگشت محتوا تشخیص داده شد')"
+
+echo ""
 echo "✓✓ تست انتها به انتها کامل شد — datasetId=$DSID | reportId=$RID"

@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import ProjectsView from '@/components/ProjectsView'
 import DataView from '@/components/DataView'
+import UpsertView from '@/components/UpsertView'
 import ColumnsEditor, { FieldMetaClient } from '@/components/ColumnsEditor'
 import ProfileView from '@/components/ProfileView'
 import CleaningView from '@/components/CleaningView'
@@ -228,6 +229,10 @@ export default function Home() {
                 setTab('columns')
               }}
             />
+            {/* به‌روزرسانی فایل و Upsert — بخش ۲۴ سند */}
+            {datasets.length > 0 && (
+              <UpsertView datasets={datasets} onUpdated={refreshDatasets} />
+            )}
             {/* فهرست مجموعه‌داده‌های موجود */}
             {datasets.length > 0 && (
               <div>

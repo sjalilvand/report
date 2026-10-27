@@ -68,3 +68,8 @@ worklog.md
 /examples
 /mini-services
 /tests
+
+# internal agent artifacts
+tool-results/
+dev.log
+server.log

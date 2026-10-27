@@ -113,7 +113,7 @@ export function runQuery(records: DataRow[], fields: FieldMeta[], spec: QuerySpe
   return { rows: limited, totals, rowCount: limited.length, scannedRecords: scanned, warnings }
 }
 
-function matchFilter(v: unknown, flt: QueryFilter): boolean {
+export function matchFilter(v: unknown, flt: QueryFilter): boolean {
   const s = v === null || v === undefined ? '' : String(v).trim()
   switch (flt.op) {
     case 'eq': return s === String(flt.value)
@@ -128,6 +128,18 @@ function matchFilter(v: unknown, flt: QueryFilter): boolean {
     case 'isnull': return s === ''
     default: return true
   }
+}
+
+// اعمال فیلترها روی رکوردها — برای Drill Through (بخش ۱۹.۳) و نماهای جزئیات
+export function applyFilters(records: DataRow[], filters: QueryFilter[], fields: FieldMeta[]): DataRow[] {
+  const fieldById = new Map(fields.map(f => [f.id, f]))
+  let data = records
+  for (const flt of filters) {
+    const f = fieldById.get(flt.fieldId)
+    if (!f) continue
+    data = data.filter(r => matchFilter(r[flt.fieldId], flt))
+  }
+  return data
 }
 
 export function measureAlias(fieldId: string | undefined, agg: AggregationType, fields: FieldMeta[]): string {
@@ -149,7 +161,8 @@ export function measureAlias(fieldId: string | undefined, agg: AggregationType, 
 
 // تجمیع سنجه با تبدیل واحد پول به مبنای ریال — بخش ۱۴.۱ سند
 // واحد ورودی (فیلد) → واحد ذخیره‌سازی مبنا (ریال) → واحد نمایش (در زمان قالب‌بندی)
-function aggregateMeasure(
+// عمومی: توسط موتور جدول محوری (بخش ۱۹.۲) نیز استفاده می‌شود
+export function aggregateMeasure(
   recs: DataRow[], m: QuerySpec['measures'][number], fields: FieldMeta[], warnings: string[]
 ): number {
   const fieldId = m.fieldId ?? ''
