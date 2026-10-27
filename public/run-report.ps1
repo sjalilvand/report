@@ -3,7 +3,9 @@
 # -------------------------------------------------------------
 #  کاربرد: وقتی پروژه را با setup-and-run.ps1 نصب کرده‌اید،
 #  برای اجراهای بعدی کافی است همین فایل را در پوشه پروژه اجرا کنید:
-#     powershell -ExecutionPolicy Bypass -File .\run-report.ps1
+#     .\run-report.ps1
+#  powershell -ExecutionPolicy Bypass -File .\run-report.ps1
+#  (در PowerShell اجرای اسکریپت پوشه جاری باید با «.\» شروع شود)
 #  گزینه‌ها:
 #     -Port 3001          پورت دلخواه
 #     -Production         اجرای حالت تولید (build + start)

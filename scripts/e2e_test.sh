@@ -42,6 +42,19 @@ print('تعداد رکورد:', d['rowCount'])
 for f in d['fields']:
     print(f\"  - {f['id']}: نوع={f['type']} اطمینان={round(f.get('confidence',0)*100)}% نقش={f['role']} واحد={f.get('unit','-')} نمونه={f.get('examples',[])}\")"
 
+# رگرسیون باگ رندر کلاینت: ردیف‌های پیش‌نمایش باید آرایه هم‌تراز با سرستون‌ها باشند
+echo ""
+echo "═══ ۳.۱) رگرسیون: شکل آرایه‌ای previewRows در حالت preview ═══"
+$CURL "$BASE/files/$FID/preview?sheet=$SHEET_ENC&mode=preview" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+rows=d['previewRows']
+assert isinstance(rows, list) and len(rows) > 0, 'خطا: previewRows خالی یا غیرآرایه است'
+for r in rows:
+    assert isinstance(r, list), 'خطا: هر ردیف باید آرایه باشد نه ' + type(r).__name__
+    assert len(r) == len(d['headers']), 'خطا: طول ردیف با تعداد سرستون هم‌تراز نیست'
+print('OK:', len(rows), 'ردیف آرایه‌ای ×', len(d['headers']), 'ستون — هم‌تراز با سرستون‌ها (باگ row.map رفع شد)')"
+
 # استخراج شناسه فیلدها به صورت پویا
 read F_PROV F_CITY F_BRANCH F_DATE F_AMT F_CNT <<< $(echo "$PREVIEW" | python3 -c "
 import json,sys

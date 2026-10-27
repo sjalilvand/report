@@ -5,7 +5,11 @@
 #  نحوه اجرا (فقط همین یک فایل کافی است):
 #    1) این فایل را در یک پوشه خالی ذخیره کنید
 #    2) PowerShell را باز کنید و اجرا کنید:
-#       powershell -ExecutionPolicy Bypass -File .\setup-and-run.ps1
+#       .\setup-and-run.ps1
+#      powershell -ExecutionPolicy Bypass -File .\setup-and-run.ps1
+#
+#    ⚠ نکته مهم: در PowerShell اجرای اسکریپتِ پوشه جاری حتماً باید با «.\» آغاز شود؛
+#      در غیر این صورت خطای "is not recognized as a name of a cmdlet" می‌گیرید.
 #    3) گزینه‌های اختیاری:
 #       -InstallDir "D:\apps\report"   مسیر نصب (پیش‌فرض: پوشه جاری\report)
 #       -RepoUrl    "https://github.com/sjalilvand/report.git"
@@ -14,8 +18,9 @@
 #       -SkipClone                      اگر مخزن را قبلاً دانلود کرده‌اید
 #       -NoBrowser                      باز نکردن خودکار مرورگر
 # -------------------------------------------------------------
-#  پس از نصب، برای اجراهای بعدی دو میان‌بر در پوشه نصب ساخته می‌شود:
-#    start-report.ps1  (اجرای سریع)   |   stop-report.ps1  (توقف)
+#  پس از نصب، سه میان‌بر در پوشه نصب و پوشه فراخوانی ساخته می‌شود:
+#    start-report.ps1 (اجرای سریع) | stop-report.ps1 (توقف) | update-report.ps1 (به‌روزرسانی از GitHub)
+#  اجرای هر سه باید با «.\» شروع شود، مثلاً:  .\start-report.ps1
 # =============================================================
 
 param(
@@ -42,7 +47,8 @@ Write-Host "  سکوی هوشمند گزارش‌ساز — نصب و اجرا �
 Write-Host "==============================================" -ForegroundColor Magenta
 
 # ---------- 1) مسیر نصب ----------
-if (-not $InstallDir) { $InstallDir = Join-Path (Get-Location) "report" }
+$InvokeDir = (Get-Location).Path
+if (-not $InstallDir) { $InstallDir = Join-Path $InvokeDir "report" }
 Write-Step "مسیر نصب: $InstallDir"
 
 # ---------- 2) بررسی Git ----------
@@ -86,8 +92,13 @@ if ($SkipClone) {
   Write-Step "مخزن موجود است؛ دریافت آخرین تغییرات..."
   Push-Location $InstallDir
   git pull --ff-only 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warn2 "به‌روزرسانی خودکار انجام نشد (تغییرات محلی یا شبکه؟). نسخه موجود روی سیستم ادامه می‌یابد."
+    Write-Host "    برای به‌روزرسانی دستی: cd `"$InstallDir`" سپس git stash و git pull" -ForegroundColor DarkGray
+  } else {
+    Write-Ok "به‌روزرسانی انجام شد"
+  }
   Pop-Location
-  Write-Ok "به‌روزرسانی انجام شد"
 } else {
   Write-Step "دریافت پروژه از GitHub..."
   git clone $RepoUrl $InstallDir
@@ -131,9 +142,12 @@ if ($LASTEXITCODE -ne 0) { Die "ایجاد دیتابیس ناموفق بود." 
 Write-Ok "دیتابیس آماده شد (db/custom.db)"
 
 # ---------- 8) ساخت میان‌برهای اجرای بعدی ----------
-Write-Step "ساخت میان‌برهای start-report.ps1 و stop-report.ps1 ..."
+Write-Step "ساخت میان‌برهای start-report.ps1 و stop-report.ps1 و update-report.ps1 ..."
+# مسیر نصب به‌صورت ثابت در میان‌برها نوشته می‌شود تا از هر پوشه‌ای قابل اجرا باشند
+$safeDir = $InstallDir.Replace("'", "''")
 $startScript = @"
 # اجرای سریع سکوی گزارش‌ساز (پس از نصب اولیه)
+# اجرا: .\start-report.ps1   (نقطه و بک‌اسلش ابتدای دستور الزامی است)
 param(
   [int]`$Port = $Port,
   [switch]`$Production,
@@ -141,13 +155,13 @@ param(
 )
 `$ErrorActionPreference = "Stop"
 try { chcp 65001 | Out-Null; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
-Set-Location (Split-Path -Parent `$MyInvocation.MyCommand.Path)
-if (-not (Test-Path ".env")) { Write-Host "[X] فایل .env یافت نشد؛ ابتدا setup-and-run.ps1 را اجرا کنید." -ForegroundColor Red; exit 1 }
+Set-Location '$safeDir'
+if (-not (Test-Path ".env")) { Write-Host "[X] فایل .env یافت نشد؛ ابتدا .\setup-and-run.ps1 را اجرا کنید." -ForegroundColor Red; exit 1 }
 Write-Host "==> همگام‌سازی دیتابیس..." -ForegroundColor Cyan
 npx prisma db push
 if (`$LASTEXITCODE -ne 0) { Write-Host "[X] خطا در دیتابیس." -ForegroundColor Red; exit 1 }
 `$busy = Get-NetTCPConnection -LocalPort `$Port -State Listen -ErrorAction SilentlyContinue
-if (`$busy) { Write-Host "[!] پورت `$Port اشغال است؛ با -Port 3001 اجرا کنید یا سرور قبلی را با stop-report.ps1 ببندید." -ForegroundColor Yellow; exit 1 }
+if (`$busy) { Write-Host "[!] پورت `$Port اشغال است؛ با -Port 3001 اجرا کنید یا سرور قبلی را با .\stop-report.ps1 ببندید." -ForegroundColor Yellow; exit 1 }
 Write-Host ""
 Write-Host "==============================================" -ForegroundColor Magenta
 Write-Host "  برنامه در حال اجراست:  http://localhost:`$Port" -ForegroundColor Green
@@ -165,6 +179,7 @@ if (`$Production) {
 "@
 $stopScript = @"
 # توقف سرور سکوی گزارش‌ساز روی پورت مشخص
+# اجرا: .\stop-report.ps1
 param([int]`$Port = $Port)
 `$conns = Get-NetTCPConnection -LocalPort `$Port -State Listen -ErrorAction SilentlyContinue
 if (-not `$conns) {
@@ -179,9 +194,41 @@ if (-not `$conns) {
   try { Stop-Process -Id `$_ -Force; Write-Host "[OK] فرایند `$_ متوقف شد." -ForegroundColor Green } catch {}
 }
 "@
-Set-Content -Path (Join-Path $InstallDir "start-report.ps1") -Value $startScript -Encoding UTF8
-Set-Content -Path (Join-Path $InstallDir "stop-report.ps1")  -Value $stopScript  -Encoding UTF8
-Write-Ok "میان‌برها ساخته شدند"
+# اسکریپت به‌روزرسانی: git pull + نصب وابستگی‌ها + همگام‌سازی دیتابیس
+$updateScript = @'
+# به‌روزرسانی پروژه از GitHub و اعمال تغییرات
+# اجرا: .\update-report.ps1
+$ErrorActionPreference = "Stop"
+try { chcp 65001 | Out-Null; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+Set-Location '__INSTALLDIR__'
+Write-Host "==> دریافت آخرین تغییرات از GitHub..." -ForegroundColor Cyan
+git pull --ff-only
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "[X] به‌روزرسانی ناموفق بود؛ تغییرات محلی دارید؟" -ForegroundColor Red
+  Write-Host "    راه حل: git stash سپس دوباره .\update-report.ps1" -ForegroundColor Yellow
+  exit 1
+}
+Write-Host "==> نصب وابستگی‌ها..." -ForegroundColor Cyan
+npm install --no-audit --no-fund
+if ($LASTEXITCODE -ne 0) { Write-Host "[X] خطا در نصب وابستگی‌ها." -ForegroundColor Red; exit 1 }
+Write-Host "==> همگام‌سازی دیتابیس (Prisma)..." -ForegroundColor Cyan
+npx prisma generate
+npx prisma db push
+if ($LASTEXITCODE -ne 0) { Write-Host "[X] خطا در دیتابیس." -ForegroundColor Red; exit 1 }
+Write-Host ""
+Write-Host "[OK] به‌روزرسانی کامل شد. اکنون سرور را اجرا کنید:  .\start-report.ps1" -ForegroundColor Green
+'@
+$updateScript = $updateScript.Replace('__INSTALLDIR__', $safeDir)
+Set-Content -Path (Join-Path $InstallDir "start-report.ps1")  -Value $startScript  -Encoding UTF8
+Set-Content -Path (Join-Path $InstallDir "stop-report.ps1")   -Value $stopScript   -Encoding UTF8
+Set-Content -Path (Join-Path $InstallDir "update-report.ps1") -Value $updateScript -Encoding UTF8
+# کپی میان‌برها در پوشه‌ای که اسکریپت نصب از آن اجرا شده (برای دسترسی راحت‌تر)
+if ((Resolve-Path $InvokeDir).Path -ne (Resolve-Path $InstallDir).Path) {
+  foreach ($sf in @("start-report.ps1", "stop-report.ps1", "update-report.ps1")) {
+    Copy-Item (Join-Path $InstallDir $sf) (Join-Path $InvokeDir $sf) -Force
+  }
+}
+Write-Ok "میان‌برها ساخته شدند (در پوشه نصب و پوشه $InvokeDir)"
 
 # ---------- 9) بررسی اشغال بودن پورت ----------
 $portBusy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
@@ -195,7 +242,12 @@ Write-Host "==============================================" -ForegroundColor Mag
 Write-Host "  برنامه در حال اجراست:  http://localhost:$Port" -ForegroundColor Green
 Write-Host "  نخستین کاربری که ثبت‌نام کند، مدیر سامانه است." -ForegroundColor Yellow
 Write-Host "  نمونه فایل آزمایشی: پوشه public/samples در پروژه" -ForegroundColor Gray
-Write-Host "  توقف: Ctrl+C   |   اجراهای بعدی: .\start-report.ps1" -ForegroundColor Gray
+Write-Host "----------------------------------------------" -ForegroundColor DarkGray
+Write-Host "  اجراهای بعدی (نقطه و بک‌اسلش ابتدای دستور الزامی است):" -ForegroundColor Gray
+Write-Host "    .\start-report.ps1      اجرای برنامه" -ForegroundColor White
+Write-Host "    .\stop-report.ps1       توقف سرور (از پنجره دیگر)" -ForegroundColor White
+Write-Host "    .\update-report.ps1     به‌روزرسانی از GitHub" -ForegroundColor White
+Write-Host "  محل میان‌برها: $InstallDir و $InvokeDir" -ForegroundColor DarkGray
 Write-Host "==============================================" -ForegroundColor Magenta
 
 Start-Sleep -Seconds 2

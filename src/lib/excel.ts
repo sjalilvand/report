@@ -180,6 +180,20 @@ function detectSheet(name: string, ws: XLSX.WorkSheet, globalWarnings: string[])
 }
 
 // استخراج جدول از شیت با پیکربندی مدیر — بخش‌های ۶ (مرحله چهارم) و ۷.۲
+// نمایش متنی یکنواخت مقادیر سلول برای ارسال به کلاینت (پیش‌نمایش و جدول)
+// تاریخ → «YYYY-MM-DD» (با ساعت در صورت وجود)، شیء → JSON، تهی → رشته خالی
+export function cellToDisplay(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  if (v instanceof Date) {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const datePart = `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`
+    const hasTime = v.getHours() !== 0 || v.getMinutes() !== 0 || v.getSeconds() !== 0
+    return hasTime ? `${datePart} ${pad(v.getHours())}:${pad(v.getMinutes())}` : datePart
+  }
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
 export interface ExtractConfig {
   headerRow: number           // شاخص صفرمبنا
   firstDataRow: number

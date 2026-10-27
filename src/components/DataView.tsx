@@ -384,8 +384,8 @@ export default function DataView({
                     <TableBody>
                       {preview.result.previewRows.map((row, ri) => (
                         <TableRow key={ri}>
-                          {row.map((cell, ci) => (
-                            <TableCell key={ci} className="text-xs whitespace-nowrap max-w-48 truncate">{cell}</TableCell>
+                          {(Array.isArray(row) ? row : []).map((cell, ci) => (
+                            <TableCell key={ci} className="text-xs whitespace-nowrap max-w-48 truncate">{cell === null || cell === undefined ? '' : String(cell)}</TableCell>
                           ))}
                         </TableRow>
                       ))}

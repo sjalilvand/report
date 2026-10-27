@@ -3,7 +3,7 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { ok, fail } from '@/lib/server'
-import { extractTable, ExtractConfig } from '@/lib/excel'
+import { extractTable, cellToDisplay, ExtractConfig } from '@/lib/excel'
 import { buildFieldMetas, rekeyRecords, parseJson } from '@/lib/server'
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -44,7 +44,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
 
     // پیش‌نمایش محدود — بخش ۳۰.۱ (پیش‌نمایش محدود به نمونه مناسب)
-    const previewRows = result.records.slice(0, 15)
+    // ردیف‌ها باید آرایه‌ای هم‌تراز با سرستون‌ها باشند تا جدول کلاینت بدون خطا رندر شود
+    const previewRows = result.records.slice(0, 15).map(rec => result.headers.map(h => cellToDisplay(rec[h])))
     return ok({ ...result, records: undefined, previewRows, rowCount: result.records.length, fields, config: cfg })
   } catch (e) {
     return fail(e instanceof Error ? e.message : 'خطا در استخراج جدول')

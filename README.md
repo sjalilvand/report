@@ -32,7 +32,22 @@ powershell -ExecutionPolicy Bypass -File .\setup-and-run.ps1
 
 گزینه‌های اختیاری: `-InstallDir "D:\apps\report"` (مسیر نصب)، `-Port 3001`، `-Production` (حالت تولید)، `-SkipClone`، `-NoBrowser`.
 
-پس از نصب، برای اجراهای بعدی دو میان‌بر در پوشه نصب ساخته می‌شود: `start-report.ps1` (اجرای سریع) و `stop-report.ps1` (توقف سرور).
+پس از نصب، سه میان‌بر در پوشه نصب و پوشه فراخوانی ساخته می‌شود: `start-report.ps1` (اجرای سریع)، `stop-report.ps1` (توقف سرور) و `update-report.ps1` (به‌روزرسانی از GitHub + نصب وابستگی‌ها + همگام‌سازی دیتابیس).
+
+### عیب‌یابی ویندوز
+
+| خطا | علت | راه حل |
+|-----|-----|--------|
+| `start-report.ps1 is not recognized as a name of a cmdlet...` | در PowerShell اسکریپت‌های پوشه جاری بدون پیشوند `.\` اجرا نمی‌شوند | دستور را با `.\` شروع کنید: `.\start-report.ps1` |
+| `running scripts is disabled on this system` | سیاست اجرای اسکریپت | `powershell -ExecutionPolicy Bypass -File .\start-report.ps1` |
+| به‌روزرسانی ناموفق با `git pull` | تغییرات محلی روی فایل‌ها | در پوشه پروژه: `git stash` سپس `git pull` (یا `setup-and-run.ps1` را دوباره با «.\» اجرا کنید) |
+
+```powershell
+# اجرای درست میان‌برها (با نقطه و بک‌اسلش):
+.\start-report.ps1
+.\stop-report.ps1
+.\update-report.ps1
+```
 
 ### اجرای دستی (ویندوز/لینوکس/مک)
 
