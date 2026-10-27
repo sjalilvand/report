@@ -1,0 +1,127 @@
+// سامانه «سکوی هوشمند آماده‌سازی داده، مدل‌سازی و گزارش‌سازی»
+// مدل اطلاعاتی مطابق بخش ۲۸ سند نیازمندی‌ها (نسخه MVP)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// فضای کاری / پروژه — بخش ۶ سند (مرحله اول: ایجاد پروژه)
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  owner       String?
+  domain      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  files       SourceFile[]
+  datasets    Dataset[]
+  reports     Report[]
+  measures    MeasureDefinition[]
+  auditEvents AuditEvent[]
+}
+
+// فایل منبع — SourceFile در بخش ۲۸ سند
+model SourceFile {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  size        Int
+  mimeType    String?
+  fingerprint String // اثر انگشت محتوا برای تشخیص فایل تکراری (بخش ۷.۱)
+  content     String // محتوای فایل به صورت Base64 (حفظ داده خام — بخش ۴)
+  sheetInfo   String   @default("[]") // JSON: نام شیت‌ها و شناسایی اولیه
+  uploadedBy  String?
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  datasets    Dataset[]
+
+  @@unique([projectId, fingerprint])
+  @@index([projectId])
+}
+
+// مجموعه‌داده آماده‌شده از یک شیت — Dataset و DatasetVersion در بخش ۲۸
+model Dataset {
+  id             String   @id @default(cuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileId         String
+  file           SourceFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  name           String
+  sheetName      String
+  headerRow      Int      @default(1) // سطر سرستون (بخش ۷.۱)
+  firstDataRow   Int      @default(0)
+  lastDataRow    Int      @default(0) // 0 یعنی تا پایان
+  config         String   @default("{}") // JSON: پیکربندی (سیاست سلول ادغام‌شده، سطرهای حذف‌شده و ...)
+  fields         String   @default("[]") // JSON: FieldMeta[] — مشخصات ستون‌ها (بخش ۸)
+  records        String   @default("[]") // JSON: رکوردهای نسخه جاری (داده آماده‌شده)
+  rowCount       Int      @default(0)
+  grain          String? // سطح جزئیات داده — بخش ۱۱.۳
+  currencyBase   String   @default("rial") // واحد ذخیره‌سازی مبنا — بخش ۱۴.۱
+  version        Int      @default(1) // نسخه مجموعه‌داده — بخش ۲۴.۳
+  transforms     String   @default("[]") // JSON: دفترچه مراحل تبدیل — بخش ۱۰.۳
+  status         String   @default("draft") // draft | confirmed
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  reports        Report[]
+
+  @@index([projectId])
+}
+
+// فیلد مشتق‌شده / سنجه محاسباتی — بخش ۱۲ و ۱۸ (فرهنگ داده)
+model MeasureDefinition {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name         String // کد/نام شاخص
+  label        String
+  description  String? // تعریف مدیریتی
+  formula      String // فرمول
+  unit         String?
+  aggregation  String   @default("sum") // نوع تجمیع — بخش ۱۱.۴
+  datasetId    String? // جدول منبع
+  owner        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// گزارش — Report و ReportVersion و ReportComponent در بخش ۲۸
+model Report {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  datasetId   String?
+  dataset     Dataset? @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+  title       String
+  description String?
+  config      String   @default("{}") // JSON: اجزای گزارش (جدول، نمودار، کارت شاخص، فیلترها)
+  status      String   @default("draft") // draft | confirmed | published — بخش ۲۶.۱
+  createdBy   String?
+  publishedAt DateTime?
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// ثبت رویداد — AuditEvent در بخش ۲۸ (بخش ۴: ردیابی)
+model AuditEvent {
+  id        String   @id @default(cuid())
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  action    String
+  detail    String?
+  actor     String?
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+}

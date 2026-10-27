@@ -1,0 +1,331 @@
+'use client'
+
+// سکوی هوشمند آماده‌سازی داده، مدل‌سازی و گزارش‌سازی
+// صفحه اصلی — فرایند ۹ مرحله‌ای کاربر مطابق بخش ۶ سند
+
+import { useState, useEffect, useCallback } from 'react'
+import { api } from '@/lib/client'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import ProjectsView from '@/components/ProjectsView'
+import DataView from '@/components/DataView'
+import ColumnsEditor, { FieldMetaClient } from '@/components/ColumnsEditor'
+import ProfileView from '@/components/ProfileView'
+import CleaningView from '@/components/CleaningView'
+import ModelView from '@/components/ModelView'
+import ReportBuilder from '@/components/ReportBuilder'
+import {
+  FolderKanban, Database, Columns3, Gauge, Wand2, Boxes, BarChart3,
+  ScrollText, ArrowRight, Sparkles, FileCheck2,
+} from 'lucide-react'
+
+interface Project { id: string; name: string; description?: string | null; owner?: string | null; domain?: string | null }
+interface DatasetRow {
+  id: string
+  name: string
+  sheetName: string
+  rowCount: number
+  version: number
+  status: string
+  grain?: string | null
+  fields: string
+  transforms?: string
+}
+interface DatasetDetail extends Omit<DatasetRow, 'fields' | 'transforms'> {
+  projectId: string
+  config: Record<string, unknown>
+  file: { id: string; name: string; size: number; fingerprint: string }
+  sample: Record<string, unknown>[]
+  fields: FieldMetaClient[] // API جزئیات، فیلدها را پارس‌شده برمی‌گرداند
+  transforms: unknown[]
+}
+
+type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'reports'
+
+export default function Home() {
+  const [project, setProject] = useState<Project | null>(null)
+  const [tab, setTab] = useState<TabKey>('projects')
+  const [datasets, setDatasets] = useState<DatasetRow[]>([])
+  const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null)
+  const [detail, setDetail] = useState<DatasetDetail | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        if (!project) return
+        const list = await api.get<DatasetRow[]>(`/api/datasets?projectId=${project.id}`)
+        if (!cancelled) setDatasets(list)
+      } catch { /* بی‌صدا */ }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [project?.id])
+
+  const refreshDatasets = useCallback(async () => {
+    if (!project) return
+    try {
+      const list = await api.get<DatasetRow[]>(`/api/datasets?projectId=${project.id}`)
+      setDatasets(list)
+    } catch { /* بی‌صدا */ }
+  }, [project])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (!activeDatasetId || cancelled) return
+      try {
+        const d = await api.get<DatasetDetail>(`/api/datasets/${activeDatasetId}`)
+        if (!cancelled) setDetail(d)
+      } catch {
+        if (!cancelled) setDetail(null)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [activeDatasetId])
+
+  const refreshDetail = useCallback(async () => {
+    if (!activeDatasetId) return
+    try {
+      const d = await api.get<DatasetDetail>(`/api/datasets/${activeDatasetId}`)
+      setDetail(d)
+    } catch { setDetail(null) }
+  }, [activeDatasetId])
+
+  const fields: FieldMetaClient[] = detail?.fields ?? []
+  const transforms: unknown[] = detail?.transforms ?? []
+
+  const selectProject = (p: Project) => {
+    setProject(p)
+    setTab('data')
+    setActiveDatasetId(null)
+    setDetail(null)
+  }
+
+  const clearDataset = () => {
+    setActiveDatasetId(null)
+    setDetail(null)
+  }
+
+  if (!project) {
+    return (
+      <div className="min-h-screen flex flex-col bg-gradient-to-b from-emerald-50/60 via-background to-background">
+        <LandingHeader />
+        <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl w-full">
+          <ProjectsView onSelect={selectProject} />
+        </main>
+        <Footer />
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col bg-background">
+      {/* سربرگ برنامه — بخش ۲۲: درج لوگو، سربرگ */}
+      <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="container mx-auto px-4 py-3 max-w-7xl">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => { setProject(null); setTab('projects'); clearDataset() }}>
+                <ArrowRight className="size-4" /> پروژه‌ها
+              </Button>
+              <div className="h-6 w-px bg-border" />
+              <div>
+                <h1 className="font-bold text-sm leading-6">{project.name}</h1>
+                <p className="text-[10px] text-muted-foreground">
+                  نسخه فعال: {detail ? `داده v${detail.version}` : 'بدون مجموعه‌داده'}
+                  {detail?.grain ? ` | سطح جزئیات: ${detail.grain}` : ''}
+                </p>
+              </div>
+            </div>
+            <Badge variant="outline" className="gap-1.5 text-[10px]">
+              <Sparkles className="size-3" /> سکوی هوشمند گزارش‌ساز — نسخه ۱.۰
+            </Badge>
+          </div>
+
+          {/* ناوبری مراحل — بخش ۶ سند */}
+          <Tabs value={tab} onValueChange={v => setTab(v as TabKey)} className="mt-3">
+            <TabsList className="flex-wrap h-auto gap-1 justify-start w-full">
+              <TabsTrigger value="data" className="gap-1.5 text-xs"><Database className="size-3.5" /> فایل‌ها و مجموعه‌داده</TabsTrigger>
+              <TabsTrigger value="columns" className="gap-1.5 text-xs" disabled={!detail}><Columns3 className="size-3.5" /> ستون‌ها</TabsTrigger>
+              <TabsTrigger value="profile" className="gap-1.5 text-xs" disabled={!detail}><Gauge className="size-3.5" /> پروفایل و کیفیت</TabsTrigger>
+              <TabsTrigger value="cleaning" className="gap-1.5 text-xs" disabled={!detail}><Wand2 className="size-3.5" /> پاک‌سازی</TabsTrigger>
+              <TabsTrigger value="model" className="gap-1.5 text-xs" disabled={!detail}><Boxes className="size-3.5" /> مدل و شاخص‌ها</TabsTrigger>
+              <TabsTrigger value="reports" className="gap-1.5 text-xs" disabled={!detail}><BarChart3 className="size-3.5" /> گزارش‌ساز</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+      </header>
+
+      <main className="flex-1 container mx-auto px-4 py-6 max-w-7xl">
+        {tab === 'data' && (
+          <div className="space-y-6">
+            <DataView
+              projectId={project.id}
+              activeProjectName={project.name}
+              onDatasetCreated={async (id) => {
+                await refreshDatasets()
+                setActiveDatasetId(id)
+                setDetail(null)
+                setTab('columns')
+              }}
+            />
+            {/* فهرست مجموعه‌داده‌های موجود */}
+            {datasets.length > 0 && (
+              <div>
+                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                  <Database className="size-4" /> مجموعه‌داده‌های پروژه
+                </h3>
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {datasets.map(d => (
+                    <button
+                      key={d.id}
+                      onClick={() => { setActiveDatasetId(d.id); setDetail(null); setTab('columns') }}
+                      className={`text-right rounded-xl border p-4 transition-all hover:shadow-md ${activeDatasetId === d.id ? 'border-primary ring-1 ring-primary' : ''}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium text-sm truncate">{d.name}</p>
+                        <Badge variant="secondary" className="text-[10px]">v{d.version}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        شیت «{d.sheetName}» | {d.rowCount.toLocaleString('fa-IR')} رکورد
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                        <FileCheck2 className="size-3" /> {d.status === 'confirmed' ? 'تأییدشده' : 'پیش‌نویس'}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'columns' && detail && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<Columns3 className="size-4" />}
+              title="نمایش و ویرایش مشخصات ستون‌ها"
+              desc={`مجموعه‌داده «${detail.name}» — ${detail.rowCount.toLocaleString('fa-IR')} رکورد | تشخیص خودکار پیشنهاد است، تصمیم نهایی با مدیر (بخش ۴ سند)`}
+            />
+            <ColumnsEditor
+              datasetId={detail.id}
+              fields={fields}
+              onChange={() => { refreshDetail(); refreshDatasets() }}
+            />
+          </div>
+        )}
+
+        {tab === 'profile' && detail && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<Gauge className="size-4" />}
+              title="شناسنامه و کیفیت داده"
+              desc="برای هر ستون و مجموعه‌داده: خالی‌ها، متمایزها، کمینه/بیشینه، میانگین/میانه، فراوانی و وضعیت کیفیت (بخش ۹ سند)"
+            />
+            <ProfileView datasetId={detail.id} fields={fields} />
+          </div>
+        )}
+
+        {tab === 'cleaning' && detail && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<Wand2 className="size-4" />}
+              title="ابزارهای پاک‌سازی و تبدیل"
+              desc="تبدیل‌های متنی و ساختاری با دفترچه مراحل تبدیل قابل ردیابی (بخش ۱۰ سند)"
+            />
+            <CleaningView
+              datasetId={detail.id}
+              fields={fields}
+              fileName={detail.file.name}
+              sheetName={detail.sheetName}
+              transforms={transforms}
+              onChange={() => { refreshDetail(); refreshDatasets() }}
+            />
+          </div>
+        )}
+
+        {tab === 'model' && detail && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<Boxes className="size-4" />}
+              title="مدل معنایی: ابعاد، سنجه‌ها، کلیدها و فیلدهای مشتق‌شده"
+              desc="تفکیک ابعاد از سنجه‌ها، سطح جزئیات، آزمون یکتایی، فرمول‌نویسی امن و بازه‌سازی (بخش‌های ۱۱ تا ۱۳ و ۱۷ سند)"
+            />
+            <ModelView
+              datasetId={detail.id}
+              fields={fields}
+              grain={detail.grain}
+              records={detail.sample}
+              onChange={() => { refreshDetail(); refreshDatasets() }}
+            />
+          </div>
+        )}
+
+        {tab === 'reports' && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<BarChart3 className="size-4" />}
+              title="طراح گزارش و داشبورد"
+              desc="طراحی بدون کدنویسی با جدول، نمودار، کارت شاخص، فیلترها، گزارش توصیفی، انتشار و خروجی (بخش‌های ۱۹ تا ۲۳ سند)"
+            />
+            <ReportBuilder
+              projectId={project.id}
+              datasets={datasets}
+              selectedDatasetId={activeDatasetId}
+              onSelectDataset={setActiveDatasetId}
+            />
+          </div>
+        )}
+      </main>
+
+      <Footer />
+    </div>
+  )
+}
+
+function SectionHead({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 text-primary">{icon}</div>
+      <div>
+        <h2 className="text-lg font-bold">{title}</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+      </div>
+    </div>
+  )
+}
+
+function LandingHeader() {
+  return (
+    <header className="border-b bg-background/80 backdrop-blur">
+      <div className="container mx-auto px-4 py-4 max-w-6xl flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="size-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center">
+            <ScrollText className="size-5" />
+          </div>
+          <div>
+            <h1 className="font-bold text-lg leading-7">سکوی هوشمند آماده‌سازی داده، مدل‌سازی و گزارش‌سازی</h1>
+            <p className="text-xs text-muted-foreground">دریافت منعطف داده + آماده‌سازی قابل ردیابی + مدل‌سازی صحیح + گزارش‌سازی بدون کدنویسی + انتشار امن (بخش ۳۷ سند)</p>
+          </div>
+        </div>
+        <Badge variant="secondary">نسخه ۱.۰ — فازهای صفر تا سه سند</Badge>
+      </div>
+    </header>
+  )
+}
+
+function Footer() {
+  return (
+    <footer className="mt-auto border-t bg-muted/30">
+      <div className="container mx-auto px-4 py-4 max-w-6xl">
+        <p className="text-center text-[11px] text-muted-foreground">
+          سکوی هوشمند گزارش‌ساز | مطابق سند نیازمندی‌های نسخه ۱.۰ | پشتیبانی فارسی و راست‌به‌چپ، تقویم شمسی، واحد پول با مبنای ریال (بخش ۴ سند)
+        </p>
+      </div>
+    </footer>
+  )
+}
