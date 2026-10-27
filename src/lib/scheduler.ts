@@ -7,6 +7,7 @@ import { db } from './db'
 import { getSettings } from './settings'
 import { evaluateProjectRules } from './alerts'
 import { sendNotificationsDigest } from './mailer'
+import { runDueConnectionSyncs } from './connectors'
 
 export interface SchedulerState {
   running: boolean
@@ -17,6 +18,8 @@ export interface SchedulerState {
   lastRunEvaluated: number
   lastRunCreated: number
   lastEmailSent: boolean
+  lastConnSync: number
+  lastConnSyncFailed: number
   lastError: string | null
 }
 
@@ -31,7 +34,7 @@ const g = globalThis as unknown as { __alertScheduler?: SchedulerInternals }
 
 export function getSchedulerState(): SchedulerState {
   const s = g.__alertScheduler
-  if (!s) return { running: false, intervalMinutes: 0, startedAt: null, lastRunAt: null, lastRunProjects: 0, lastRunEvaluated: 0, lastRunCreated: 0, lastEmailSent: false, lastError: null }
+  if (!s) return { running: false, intervalMinutes: 0, startedAt: null, lastRunAt: null, lastRunProjects: 0, lastRunEvaluated: 0, lastRunCreated: 0, lastEmailSent: false, lastConnSync: 0, lastConnSyncFailed: 0, lastError: null }
   return {
     running: s.running,
     intervalMinutes: s.intervalMinutes,
@@ -41,6 +44,8 @@ export function getSchedulerState(): SchedulerState {
     lastRunEvaluated: s.lastRunEvaluated,
     lastRunCreated: s.lastRunCreated,
     lastEmailSent: s.lastEmailSent,
+    lastConnSync: s.lastConnSync,
+    lastConnSyncFailed: s.lastConnSyncFailed,
     lastError: s.lastError,
   }
 }
@@ -113,6 +118,18 @@ async function tick() {
     if (res.evaluated > 0) {
       console.log(`[زمان‌بند] ارزیابی خودکار: ${res.projects} پروژه، ${res.evaluated} قاعده، ${res.created} اعلان جدید${res.emailSent ? ' (ایمیل ارسال شد)' : res.emailSkipped ? ` (ایمیل: ${res.emailSkipped})` : ''}`)
     }
+
+    // همگام‌سازی زمان‌بندی‌شده منابع داده خارجی — بخش ۳۱ سند
+    try {
+      const conns = await runDueConnectionSyncs()
+      s.lastConnSync = conns.synced
+      s.lastConnSyncFailed = conns.failed
+      if (conns.synced > 0 || conns.failed > 0) {
+        console.log(`[زمان‌بند] همگام‌سازی منابع خارجی: ${conns.checked} اتصال بررسی شد، ${conns.synced} موفق، ${conns.failed} ناموفق`)
+      }
+    } catch (e) {
+      console.error('[زمان‌بند] خطای همگام‌سازی منابع خارجی:', e instanceof Error ? e.message : e)
+    }
   } catch (e) {
     if (s) s.lastError = e instanceof Error ? e.message : 'خطای ناشناخته'
     console.error('[زمان‌بند] خطا در چرخه ارزیابی:', e)
@@ -127,6 +144,7 @@ export function startAlertScheduler(): void {
   const s: SchedulerInternals = g.__alertScheduler ?? {
     running: false, intervalMinutes: 60, startedAt: null, lastRunAt: null,
     lastRunProjects: 0, lastRunEvaluated: 0, lastRunCreated: 0, lastEmailSent: false,
+    lastConnSync: 0, lastConnSyncFailed: 0,
     lastError: null, timer: null, ticking: false, tickCount: 0,
   }
   g.__alertScheduler = s

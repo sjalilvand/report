@@ -26,6 +26,23 @@ export interface PlatformSettings {
   smtpPass: string             // در پاسخ GET با *** ماسک می‌شود
   smtpFrom: string             // فرستنده، مثلا: هشدار گزارش‌ساز <alert@example.com>
   alertEmailTo: string         // گیرندگان، با کاما جدا می‌شوند
+  // احراز هویت چندمرحله‌ای (MFA) — بخش ۲۹ سند
+  mfaRequiredRoles: string     // نقش‌هایی که فعال‌سازی MFA برایشان توصیه/الزام می‌شود، با کاما
+  // ورود یکپارچه سازمانی (SSO/OIDC) — بخش ۲۹ سند
+  ssoEnabled: boolean
+  ssoIssuer: string            // آدرس پایه سامانه هویتی (کشف خودکار نقاط انتها از /.well-known)
+  ssoClientId: string
+  ssoClientSecret: string      // در پاسخ GET با *** ماسک می‌شود
+  ssoAuthorizeUrl: string      // در صورت ذکر issuer می‌تواند خالی بماند (کشف خودکار)
+  ssoTokenUrl: string
+  ssoUserinfoUrl: string
+  ssoScopes: string            // پیش‌فرض: openid profile email
+  ssoAutoProvision: boolean    // ساخت خودکار حساب برای کاربران جدید سازمان
+  ssoDefaultRole: string       // نقش حساب‌های خودکار
+  ssoAllowedDomain: string     // محدودیت دامنه ایمیل (خالی = بدون محدودیت)
+  // صف پردازش خروجی حجیم — بخش ۲۸ (Job/Export) و ۳۰.۲ (پایداری)
+  exportQueueConcurrency: number // تعداد پردازش هم‌زمان صف خروجی
+  exportFileTtlHours: number   // مدت اعتبار فایل خروجی و لینک دانلود — ابطال خودکار
 }
 
 // اهداف پیشنهادی اولیه سند — مشروط به آزمون با داده واقعی سازمان (بخش ۳۰.۱ و ۳۷)
@@ -50,6 +67,20 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   smtpPass: '',
   smtpFrom: '',
   alertEmailTo: '',
+  mfaRequiredRoles: 'admin,steward',
+  ssoEnabled: false,
+  ssoIssuer: '',
+  ssoClientId: '',
+  ssoClientSecret: '',
+  ssoAuthorizeUrl: '',
+  ssoTokenUrl: '',
+  ssoUserinfoUrl: '',
+  ssoScopes: 'openid profile email',
+  ssoAutoProvision: false,
+  ssoDefaultRole: 'viewer',
+  ssoAllowedDomain: '',
+  exportQueueConcurrency: 1,
+  exportFileTtlHours: 48,
 }
 
 export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
@@ -73,10 +104,24 @@ export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
   smtpPass: 'گذرواژه SMTP',
   smtpFrom: 'آدرس فرستنده',
   alertEmailTo: 'گیرندگان ایمیل هشدار (با کاما)',
+  mfaRequiredRoles: 'نقش‌های الزام MFA (با کاما — مثلاً admin,steward)',
+  ssoEnabled: 'ورود یکپارچه سازمانی (SSO/OIDC)',
+  ssoIssuer: 'آدرس Issuer سامانه هویتی (کشف خودکار نقاط انتها)',
+  ssoClientId: 'شناسه Client (از سامانه هویتی)',
+  ssoClientSecret: 'رمز Client (از سامانه هویتی)',
+  ssoAuthorizeUrl: 'آدرس Authorize (اختیاری با کشف خودکار)',
+  ssoTokenUrl: 'آدرس Token (اختیاری با کشف خودکار)',
+  ssoUserinfoUrl: 'آدرس Userinfo (اختیاری)',
+  ssoScopes: 'محدوده‌های OIDC',
+  ssoAutoProvision: 'ساخت خودکار حساب کاربران جدید سازمان',
+  ssoDefaultRole: 'نقش پیش‌فرض حساب‌های خودکار',
+  ssoAllowedDomain: 'محدودیت دامنه ایمیل (خالی = بدون محدودیت)',
+  exportQueueConcurrency: 'تعداد پردازش هم‌زمان صف خروجی',
+  exportFileTtlHours: 'مدت اعتبار فایل خروجی (ساعت)',
 }
 
 // فیلدهایی که در پاسخ GET ماسک می‌شوند — جلوگیری از نشت گذرواژه (بخش ۲۹)
-export const SECRET_SETTINGS: (keyof PlatformSettings)[] = ['smtpPass']
+export const SECRET_SETTINGS: (keyof PlatformSettings)[] = ['smtpPass', 'ssoClientSecret']
 export const MASK = '***'
 
 export async function getSettings(): Promise<PlatformSettings> {

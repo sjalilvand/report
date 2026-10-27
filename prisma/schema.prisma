@@ -28,6 +28,8 @@ model Project {
   alertRules  AlertRule[]
   notifications Notification[]
   occasions   Occasion[]
+  connections ExternalConnection[]
+  jobs        Job[]
 }
 
 // فایل منبع — SourceFile در بخش ۲۸ سند
@@ -55,8 +57,8 @@ model Dataset {
   id             String   @id @default(cuid())
   projectId      String
   project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  fileId         String
-  file           SourceFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  fileId         String? // برای داده واردشده از منبع خارجی (اتصال پایگاه‌داده/API — بخش ۳۱) فایل منبع وجود ندارد
+  file           SourceFile? @relation(fields: [fileId], references: [id], onDelete: SetNull)
   name           String
   sheetName      String
   headerRow      Int      @default(1) // سطر سرستون (بخش ۷.۱)
@@ -152,10 +154,15 @@ model User {
   role         String    @default("viewer") // admin | steward | analyst | viewer | auditor — بخش ۵ سند
   rowRules     String    @default("[]") // JSON: قواعد دسترسی سطح سطر [{datasetId, fieldId, op, value}] — بخش ۲۹
   active       Boolean   @default(true)
+  // ورود یکپارچه سازمانی (SSO) و احراز هویت چندمرحله‌ای (MFA) — بخش ۲۹ سند
+  ssoSubject   String?   @unique // شناسه یکتای کاربر در سامانه هویتی سازمان (sub در OIDC)
+  mfaSecret    String? // کلید TOTP (Base32) — تا پیش از فعال‌سازی فقط پیش‌نویس است
+  mfaEnabled   Boolean   @default(false)
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   sessions     Session[]
+  mfaTickets   MfaTicket[]
 
   @@index([role])
 }
@@ -171,6 +178,68 @@ model Session {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// بلیت واسط ورود دوعاملی — بخش ۲۹ سند (احراز هویت چندمرحله‌ای برای نقش‌های حساس)
+// پس از تأیید گذرواژه، اگر کاربر MFA فعال دارد، این بلیت کوتاه‌عمر صادر و با کد TOTP مبادله می‌شود
+model MfaTicket {
+  id        String   @id @default(cuid()) // توکن تصادفی تک‌مصرف
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// منبع داده خارجی — بخش ۳۱ سند («اتصال API و پایگاه‌داده» — اختیاری / مرحله توسعه)
+// انواع: api (سرویس REST/JSON) | postgres | mysql
+// همگام‌سازی دستی یا زمان‌بندی‌شده: داده به مجموعه‌داده پروژه منتقل و نسخه‌بندی می‌شود
+model ExternalConnection {
+  id                  String    @id @default(cuid())
+  projectId           String
+  project             Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name                String
+  type                String // api | postgres | mysql
+  config              String    @default("{}") // JSON — پیکربندی اتصال؛ مقادیر محرمانه در پاسخ ماسک می‌شوند
+  query               String? // پرس‌وجوی فقط‌خواندنی SQL یا مسیر پاسخ API
+  syncIntervalMinutes Int       @default(0) // 0 = فقط همگام‌سازی دستی
+  status              String    @default("untested") // untested | ok | error
+  lastMessage         String? // آخرین پیام وضعیت یا علت خطا
+  lastSyncAt          DateTime?
+  lastSyncRows        Int       @default(0)
+  datasetId           String? // مجموعه‌داده مقصد — در همگام‌سازی بعدی جایگزین می‌شود
+  createdBy           String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([projectId])
+}
+
+// پردازش پس‌زمینه — Job و Export در بخش ۲۸ و پایداری ۳۰.۲ سند (صف خروجی حجیم)
+// خروجی‌های حجیم به‌صورت غیرهم‌زمان تولید می‌شوند؛ بازیابی پردازش شکست‌خورده،
+// اجرای مجدد امن، ثبت مدت و علت شکست و انقضای لینک دانلود در همین مدل پشتیبانی می‌شود
+model Job {
+  id          String    @id @default(cuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type        String // export.xlsx | export.csv | export.pdf | export.pptx
+  status      String    @default("queued") // queued | running | done | failed | canceled
+  progress    Int       @default(0) // 0..100
+  payload     String    @default("{}") // JSON: مشخصات خروجی + قواعد سطح سطر درخواست‌کننده
+  result      String? // JSON: {fileName, size, mime, expiresAt}
+  error       String? // علت شکست — بخش ۳۰.۲ (ثبت علت)
+  attempts    Int       @default(0) // تعداد اجرا — اجرای مجدد امن (بخش ۳۰.۲)
+  maxAttempts Int       @default(2)
+  createdBy   String?
+  durationMs  Int? // مدت اجرا — بخش ۳۰.۲ (ثبت مدت)
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([projectId, status])
+  @@index([status])
 }
 
 // رابطه بین جداول — بخش ۱۶ سند (محیط بصری اتصال جداول)

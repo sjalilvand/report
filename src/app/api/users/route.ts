@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   try {
     const me = await requirePerm(req, 'user.manage')
     const users = await db.user.findMany({
-      select: { id: true, username: true, name: true, role: true, rowRules: true, active: true, lastLoginAt: true, createdAt: true },
+      select: { id: true, username: true, name: true, role: true, rowRules: true, active: true, lastLoginAt: true, createdAt: true, mfaEnabled: true, ssoSubject: true },
       orderBy: { createdAt: 'asc' },
     })
     await logAudit(null, 'مشاهده فهرست کاربران', '', me.name)

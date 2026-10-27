@@ -174,7 +174,7 @@ export async function evaluateAlertRule(rule: {
   const base: EvalResult = { ruleId: rule.id, ruleName: rule.name, type, fired: false, created: false }
 
   // مجموعه‌داده مرتبط (برای انواع داده‌محور الزامی است)
-  let ds: { id: string; name: string; projectId: string; rowCount: number; fields: string; records: string; updatedAt: Date; fileId: string } | null = null
+  let ds: { id: string; name: string; projectId: string; rowCount: number; fields: string; records: string; updatedAt: Date; fileId: string | null } | null = null
   if (['threshold', 'quality', 'fileDelay', 'structureChange', 'missingPeriod'].includes(type)) {
     if (!rule.datasetId) return { ...base, skipped: 'مجموعه‌داده مشخص نشده است.' }
     ds = await db.dataset.findUnique({
@@ -222,7 +222,7 @@ export async function evaluateAlertRule(rule: {
 
     case 'fileDelay': {
       if (rule.maxDays === null || rule.maxDays === undefined) return { ...base, skipped: 'حداکثر فاصله مجاز مشخص نشده است.' }
-      const file = ds ? await db.sourceFile.findUnique({ where: { id: ds.fileId }, select: { name: true, createdAt: true } }) : null
+      const file = ds?.fileId ? await db.sourceFile.findUnique({ where: { id: ds.fileId }, select: { name: true, createdAt: true } }) : null
       if (!file) return { ...base, skipped: 'فایل منبع یافت نشد.' }
       const ageMs = Date.now() - file.createdAt.getTime()
       const ageDays = ageMs / 86_400_000

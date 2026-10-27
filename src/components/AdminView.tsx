@@ -20,16 +20,18 @@ import { useToast } from '@/hooks/use-toast'
 import { formatNumber } from '@/lib/currency'
 import { toPersianDigits } from '@/lib/digits'
 import {
-  Users2, Settings2, ScrollText, Plus, ShieldCheck, ShieldOff, Trash2, KeyRound, Rows3, BellRing, Send,
+  Users2, Settings2, ScrollText, Plus, ShieldCheck, ShieldOff, Trash2, KeyRound, Rows3, BellRing, Send, ListTodo, KeySquare,
 } from 'lucide-react'
 
 interface UserRow {
   id: string; username: string; name: string; role: string; roleLabel: string
   active: boolean; lastLoginAt?: string | null; rowRules: RowRuleDTO[]
+  mfaEnabled?: boolean; ssoSubject?: string | null
 }
 interface RowRuleDTO { datasetId: string; fieldId: string; op: string; value?: string; values?: string[] }
 interface SettingsRow { settings: Record<string, string | number | boolean>; labels: Record<string, string> }
-interface SchedulerStatus { running: boolean; intervalMinutes: number; startedAt: string | null; lastRunAt: string | null; lastRunProjects: number; lastRunEvaluated: number; lastRunCreated: number; lastEmailSent: boolean; lastError: string | null }
+interface SchedulerStatus { running: boolean; intervalMinutes: number; startedAt: string | null; lastRunAt: string | null; lastRunProjects: number; lastRunEvaluated: number; lastRunCreated: number; lastEmailSent: boolean; lastConnSync?: number; lastConnSyncFailed?: number; lastError: string | null }
+interface HealthStatus { status: string; uptimeSec: number; checks: { database: { status: string }; scheduler: { running: boolean; lastRunAt: string | null }; queue: { running: number; queued: number; lastFinishedAt: string | null; lastError: string | null } } }
 interface AuditRow { id: string; action: string; detail?: string | null; actor?: string | null; createdAt: string; projectId?: string | null }
 interface DatasetLite { id: string; name: string; fields: string }
 
@@ -64,6 +66,7 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
   const [createOpen, setCreateOpen] = useState(false)
   const [rulesUser, setRulesUser] = useState<UserRow | null>(null)
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null)
+  const [health, setHealth] = useState<HealthStatus | null>(null)
   const [testingEmail, setTestingEmail] = useState(false)
 
   // فرم ایجاد کاربر
@@ -78,6 +81,7 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
   const loadSettings = useCallback(async () => {
     try { setSettings(await api.get<SettingsRow>('/api/settings')) } catch { /* بی‌صدا */ }
     try { const r = await api.get<{ scheduler: SchedulerStatus }>('/api/settings/scheduler'); setScheduler(r.scheduler) } catch { /* بی‌صدا */ }
+    try { setHealth(await api.get<HealthStatus>('/api/health')) } catch { /* بی‌صدا */ }
   }, [])
   const loadAudit = useCallback(async () => {
     try { setAudit(await api.get<AuditRow[]>('/api/audit')) } catch { /* بی‌صدا */ }
@@ -176,6 +180,7 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
                       <TableHead className="text-right text-xs">کاربر</TableHead>
                       <TableHead className="text-right text-xs">نقش</TableHead>
                       <TableHead className="text-right text-xs">قواعد سطری</TableHead>
+                      <TableHead className="text-right text-xs">امنیت حساب</TableHead>
                       <TableHead className="text-right text-xs">آخرین ورود</TableHead>
                       <TableHead className="text-right text-xs">فعال</TableHead>
                     </TableRow>
@@ -205,6 +210,24 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
                             }}>
                             <Rows3 className="size-3" /> {u.rowRules.length > 0 ? `${u.rowRules.length.toLocaleString('fa-IR')} قاعده` : 'تعریف قاعده'}
                           </Button>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <Badge variant={u.mfaEnabled ? 'default' : 'outline'} className="text-[10px] gap-1 w-fit">
+                              <KeyRound className="size-3" /> {u.mfaEnabled ? 'MFA فعال' : 'MFA غیرفعال'}
+                            </Badge>
+                            {u.ssoSubject && <Badge variant="secondary" className="text-[10px] w-fit">حساب سازمانی (SSO)</Badge>}
+                            {u.mfaEnabled && (
+                              <Button size="sm" variant="ghost" className="h-6 text-[10px] gap-1 text-destructive px-1.5 w-fit"
+                                onClick={() => {
+                                  if (window.confirm(`MFA کاربر «${u.name}» بازنشانی شود؟ (برای بازیابی دسترسی در گم‌شدن دستگاه احرازکننده — بخش ۲۹)`)) {
+                                    patchUser(u.id, { mfaReset: true }, 'احراز هویت چندمرحله‌ای کاربر بازنشانی شد')
+                                  }
+                                }}>
+                                <KeySquare className="size-3" /> بازنشانی MFA
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="text-[10px] text-muted-foreground">
                           {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('fa-IR') : '—'}
@@ -256,7 +279,7 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
                     <div key={key} className="space-y-1.5">
                       <Label className="text-xs">{label}</Label>
                       <Input
-                        type={key === 'smtpPass' ? 'password' : typeof val === 'number' ? 'number' : 'text'}
+                        type={key === 'smtpPass' || key === 'ssoClientSecret' ? 'password' : typeof val === 'number' ? 'number' : 'text'}
                         value={String(val)}
                         onChange={e => {
                           const v = e.target.value
@@ -318,6 +341,46 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
                 <p className="text-[11px] text-muted-foreground">
                   برای کانال ایمیلی: «ارسال ایمیلی هشدارها» را فعال، مشخصات SMTP و گیرندگان (با کاما) را وارد و ذخیره کنید، سپس با «ارسال ایمیل آزمایشی» صحت پیکربندی را بسنجید. خلاصه اعلان‌های جدیدِ هر چرخه به گیرندگان ایمیل می‌شود.
                 </p>
+
+                {/* سلامت سرویس و صف پردازش خروجی — بخش ۳۰.۲ و ۲۸ سند */}
+                <div className="rounded-lg border p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium flex items-center gap-2"><ListTodo className="size-4 text-primary" /> سلامت سرویس و صف پردازش خروجی</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      مانیتورینگ سلامت (بخش ۳۰.۲ سند): پایگاه‌داده، زمان‌بند و صف پردازش خروجی حجیم (بخش ۲۸: Job/Export). فایل‌های خروجی پس از «مدت اعتبار فایل خروجی» به‌طور خودکار ابطال می‌شوند.
+                    </p>
+                  </div>
+                  {health && (
+                    <div className="flex flex-wrap gap-2 text-[11px]">
+                      <Badge variant={health.status === 'ok' ? 'default' : 'destructive'} className="text-[10px]">
+                        سرویس: {health.status === 'ok' ? 'سالم' : 'اختلال'}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px]">پایگاه‌داده: {health.checks.database.status === 'ok' ? 'سالم' : 'خطا'}</Badge>
+                      <Badge variant="outline" className="text-[10px]">صف: {toPersianDigits(String(health.checks.queue.running))} در اجرا، {toPersianDigits(String(health.checks.queue.queued))} در انتظار</Badge>
+                      {health.checks.queue.lastError && <Badge variant="destructive" className="text-[10px]">آخرین خطای صف: {health.checks.queue.lastError}</Badge>}
+                      <Badge variant="outline" className="text-[10px]">فعالیت سرور: {toPersianDigits(String(Math.floor(health.uptimeSec / 60)))} دقیقه</Badge>
+                    </div>
+                  )}
+                  {scheduler && (scheduler.lastConnSync ?? 0) + (scheduler.lastConnSyncFailed ?? 0) > 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      آخرین چرخه همگام‌سازی منابع خارجی: {toPersianDigits(String(scheduler.lastConnSync ?? 0))} موفق، {toPersianDigits(String(scheduler.lastConnSyncFailed ?? 0))} ناموفق (بخش ۳۱ سند)
+                    </p>
+                  )}
+                </div>
+
+                {/* امنیت: SSO و MFA — بخش ۲۹ سند */}
+                <div className="rounded-lg border p-4 space-y-2">
+                  <p className="text-sm font-medium flex items-center gap-2"><ShieldCheck className="size-4 text-primary" /> امنیت ورود: SSO سازمانی و MFA دوعاملی (بخش ۲۹ سند)</p>
+                  <p className="text-[11px] text-muted-foreground leading-5">
+                    «ورود یکپارچه سازمانی» را فعال و مشخصات OIDC سامانه هویتی (Keycloak، Azure AD، Google و ...) را وارد کنید؛
+                    با ذکر «آدرس Issuer» نقاط انتهای Authorize/Token خودکار کشف می‌شوند. با فعال‌سازی «ساخت خودکار حساب»، کاربران جدید سازمان با نقش پیش‌فرض وارد می‌شوند.
+                    برای احراز هویت چندمرحله‌ای، نقش‌های الزام MFA را در فیلد «نقش‌های الزام MFA» تعیین کنید؛ هر کاربر از نمای کاربران می‌تواند MFA خود را فعال کند و مدیر در شرایط اضطراری می‌تواند آن را بازنشانی کند.
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    نکته: پس از فعال‌سازی SSO، در صفحه ورود دکمه «ورود با حساب سازمانی» نمایش داده می‌شود؛ آدرس بازگشت (Redirect URI) در سامانه هویتی:
+                    <code dir="ltr" className="ms-1 rounded bg-muted px-1.5 py-0.5">{'{آدرس سامانه}'}/api/auth/sso/callback</code>
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>

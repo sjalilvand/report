@@ -22,13 +22,16 @@ import RelationsView from '@/components/RelationsView'
 import DataDictionaryView from '@/components/DataDictionaryView'
 import AlertsView from '@/components/AlertsView'
 import OccasionsView from '@/components/OccasionsView'
+import ConnectionsView from '@/components/ConnectionsView'
+import JobsView from '@/components/JobsView'
+import AccountSecurity from '@/components/AccountSecurity'
 import NotificationBell from '@/components/NotificationBell'
 import AdminView from '@/components/AdminView'
 import LoginView, { AppUser } from '@/components/LoginView'
 import { TransformStep } from '@/lib/types'
 import {
   FolderKanban, Database, Columns3, Gauge, Wand2, Boxes, BarChart3,
-  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked, BellRing, CalendarDays,
+  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked, BellRing, CalendarDays, PlugZap, ListTodo,
 } from 'lucide-react'
 
 interface Project { id: string; name: string; description?: string | null; owner?: string | null; domain?: string | null }
@@ -46,13 +49,13 @@ interface DatasetRow {
 interface DatasetDetail extends Omit<DatasetRow, 'fields' | 'transforms'> {
   projectId: string
   config: Record<string, unknown>
-  file: { id: string; name: string; size: number; fingerprint: string }
+  file: { id: string; name: string; size: number; fingerprint: string } | null // منابع خارجی (بخش ۳۱) فایل ندارند
   sample: Record<string, unknown>[]
   fields: FieldMetaClient[] // API جزئیات، فیلدها را پارس‌شده برمی‌گرداند
   transforms: TransformStep[]
 }
 
-type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'relations' | 'dictionary' | 'occasions' | 'reports' | 'alerts' | 'admin'
+type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'relations' | 'dictionary' | 'occasions' | 'connections' | 'reports' | 'jobs' | 'alerts' | 'admin'
 
 export default function Home() {
   const [project, setProject] = useState<Project | null>(null)
@@ -214,7 +217,9 @@ export default function Home() {
               <TabsTrigger value="relations" className="gap-1.5 text-xs" disabled={datasets.length < 2}><Network className="size-3.5" /> روابط جداول</TabsTrigger>
               <TabsTrigger value="dictionary" className="gap-1.5 text-xs" disabled={!project}><BookMarked className="size-3.5" /> فرهنگ داده</TabsTrigger>
               <TabsTrigger value="occasions" className="gap-1.5 text-xs" disabled={!project}><CalendarDays className="size-3.5" /> مناسبت‌ها</TabsTrigger>
+              <TabsTrigger value="connections" className="gap-1.5 text-xs" disabled={!project}><PlugZap className="size-3.5" /> منابع داده</TabsTrigger>
               <TabsTrigger value="reports" className="gap-1.5 text-xs" disabled={!detail}><BarChart3 className="size-3.5" /> گزارش‌ساز</TabsTrigger>
+              <TabsTrigger value="jobs" className="gap-1.5 text-xs" disabled={!project}><ListTodo className="size-3.5" /> پردازش‌ها</TabsTrigger>
               <TabsTrigger value="alerts" className="gap-1.5 text-xs" disabled={!project}><BellRing className="size-3.5" /> هشدارها</TabsTrigger>
               <TabsTrigger value="admin" className="gap-1.5 text-xs"><ShieldCheck className="size-3.5" /> مدیریت</TabsTrigger>
             </TabsList>
@@ -306,7 +311,7 @@ export default function Home() {
             <CleaningView
               datasetId={detail.id}
               fields={fields}
-              fileName={detail.file.name}
+              fileName={detail.file?.name ?? 'منبع خارجی'}
               sheetName={detail.sheetName}
               transforms={transforms}
               onChange={() => { refreshDetail(); refreshDatasets() }}
@@ -373,6 +378,18 @@ export default function Home() {
           </div>
         )}
 
+        {/* منابع داده خارجی — بخش ۳۱ سند */}
+        {tab === 'connections' && project && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<PlugZap className="size-4" />}
+              title="منابع داده خارجی: API و پایگاه‌داده"
+              desc="اتصال به سرویس REST/JSON و پایگاه‌داده PostgreSQL/MySQL با پرس‌وجوی فقط‌خواندنی، همگام‌سازی دستی یا زمان‌بندی‌شده و انتقال به مجموعه‌داده با نسخه‌بندی (بخش ۳۱ سند)"
+            />
+            <ConnectionsView projectId={project.id} canEdit={['admin', 'steward', 'analyst'].includes(role)} />
+          </div>
+        )}
+
         {tab === 'reports' && (
           <div className="space-y-6">
             <div className="space-y-4">
@@ -393,6 +410,18 @@ export default function Home() {
               user={user as WorkflowUser}
               datasets={datasets.map(d => ({ id: d.id, name: d.name }))}
             />
+          </div>
+        )}
+
+        {/* صف پردازش خروجی حجیم — بخش ۲۸ (Job) و ۳۰.۲ سند */}
+        {tab === 'jobs' && project && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<ListTodo className="size-4" />}
+              title="پردازش‌های پس‌زمینه (صف خروجی حجیم)"
+              desc="تولید غیرهم‌زمان خروجی‌های حجیم با پیشرفت، بازیابی پردازش شکست‌خورده، اجرای مجدد امن، ثبت مدت و علت شکست و انقضای خودکار لینک دانلود (بخش ۳۰.۲ سند)"
+            />
+            <JobsView projectId={project.id} />
           </div>
         )}
 
@@ -417,8 +446,10 @@ export default function Home() {
             <SectionHead
               icon={<ShieldCheck className="size-4" />}
               title="مدیریت سامانه، امنیت و ظرفیت"
-              desc="کاربران و نقش‌ها، قواعد دسترسی سطح سطر، سقف‌های ظرفیت و ثبت رویدادها (بخش‌های ۲۹، ۳۰.۱ و ۳۶ سند)"
+              desc="کاربران و نقش‌ها، قواعد دسترسی سطح سطر، SSO و MFA، سقف‌های ظرفیت، صف پردازش و ثبت رویدادها (بخش‌های ۲۸ تا ۳۱ سند)"
             />
+            {/* امنیت حساب شخصی — فعال‌سازی MFA برای همه نقش‌ها — بخش ۲۹ سند */}
+            <AccountSecurity user={user} onChanged={u => setUser(prev => (prev ? { ...prev, ...u } : prev))} />
             <AdminView
               canManageUsers={role === 'admin'}
               canManageSettings={role === 'admin'}
@@ -458,7 +489,7 @@ function LandingHeader() {
             <p className="text-xs text-muted-foreground">دریافت منعطف داده + آماده‌سازی قابل ردیابی + مدل‌سازی صحیح + گزارش‌سازی بدون کدنویسی + انتشار امن (بخش ۳۷ سند)</p>
           </div>
         </div>
-        <Badge variant="secondary">نسخه ۱.۱ — فازهای صفر تا پنجم سند</Badge>
+        <Badge variant="secondary">نسخه ۱.۱ — فازهای صفر تا هفتم سند</Badge>
       </div>
     </header>
   )

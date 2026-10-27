@@ -27,7 +27,7 @@ import {
   Loader2, Play, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Table2,
   Save, FileDown, FileText, Grid3X3, X, Plus, Kanban, BookMarked, LayoutDashboard,
   TableProperties, ChevronDown, ZoomIn, RotateCcw, Crosshair, Layers, Link2,
-  Combine, Activity, Flame, Boxes, TrendingUp, Filter, LayoutGrid, Presentation,
+  Combine, Activity, Flame, Boxes, TrendingUp, Filter, LayoutGrid, Presentation, ListTodo,
 } from 'lucide-react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -418,6 +418,28 @@ export default function ReportBuilder({
   const addMeasure = () => {
     const m = measures[0]
     setSelMeasures(ms => [...ms, { fieldId: m?.id, agg: m ? 'sum' : 'count' }])
+  }
+
+  // خروجی پس‌زمینه از صف — بخش ۲۸ (Job) و ۳۰.۲ سند (خروجی حجیم غیرهم‌زمان)
+  const queueExport = async (format: 'xlsx' | 'csv' | 'pdf' | 'pptx') => {
+    if (!dataset) return
+    try {
+      const res = await api.post<{ message: string }>('/api/jobs', {
+        projectId,
+        datasetId: dataset.id,
+        format,
+        title: saveTitle.trim() || undefined,
+        chartType: format === 'pptx' ? chartType : undefined,
+        spec: {
+          dimensions: selDims,
+          measures: selMeasures.length > 0 ? selMeasures.map(m => ({ ...m, alias: aliasOf(m) })) : [{ agg: 'count', alias: 'تعداد رکورد' }],
+          filters,
+        },
+      })
+      toast({ title: 'به صف پردازش اضافه شد', description: `${res.message} — پیگیری از تب «پردازش‌ها» (بخش ۳۰.۲ سند).` })
+    } catch (e) {
+      toast({ title: 'خطا در ثبت پردازش', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    }
   }
 
   const exportReport = async (format: 'xlsx' | 'csv' | 'pptx' | 'pdf') => {
@@ -1670,8 +1692,11 @@ export default function ReportBuilder({
               <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => exportReport('pdf')} disabled={exporting || !result}>
                 <FileText className="size-3.5" /> خروجی PDF
               </Button>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs border-dashed" onClick={() => queueExport('xlsx')} disabled={!result}>
+                <ListTodo className="size-3.5" /> خروجی پس‌زمینه (صف — حجم بالا)
+              </Button>
               <span className="text-[10px] text-muted-foreground self-center">
-                خروجی فیلترها، نسخه داده و زمان تولید را ثبت می‌کند؛ مجموع خروجی با گزارش منطبق است (بخش ۲۳.۲ سند).
+                خروجی فیلترها، نسخه داده و زمان تولید را ثبت می‌کند؛ مجموع خروجی با گزارش منطبق است (بخش ۲۳.۲ سند). برای داده حجیم از «خروجی پس‌زمینه» استفاده کنید (بخش ۳۰.۲ سند).
               </span>
             </div>
           </CardContent>

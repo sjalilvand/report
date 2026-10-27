@@ -52,6 +52,13 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data.rowRules = JSON.stringify(rules)
       changes.push('قواعد دسترسی سطح سطر')
     }
+    if (body.mfaReset === true) {
+      // بازنشانی MFA توسط مدیر — بخش ۲۹ (بازیابی دسترسی در گم‌شدن دستگاه احرازکننده)
+      data.mfaEnabled = false
+      data.mfaSecret = null
+      await db.mfaTicket.deleteMany({ where: { userId: id } })
+      changes.push('بازنشانی احراز هویت چندمرحله‌ای')
+    }
 
     const updated = await db.user.update({ where: { id }, data, select: { id: true, username: true, name: true, role: true, active: true, rowRules: true } })
     if (changes.length > 0) {

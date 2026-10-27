@@ -10,6 +10,21 @@ CURL="curl -s -b $JAR -c $JAR"
 
 echo "═══ ۰) ورود / راه‌اندازی اولیه مدیر سامانه (بخش ۲۹) ═══"
 LOGIN=$($CURL -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123","name":"مدیر سامانه"}')
+# خودترمیمی: اگر MFA از اجرای قبلی نیمه‌کاره مانده، با کلید ذخیره‌شده کد TOTP بساز
+if echo "$LOGIN" | rg -q 'mfaRequired' 2>/dev/null; then
+  echo "MFA فعال مانده از اجرای قبلی — ورود با کد TOTP کلید ذخیره‌شده…"
+  MFA_SECRET=$(cat /tmp/e2e_mfa_secret.txt 2>/dev/null || echo "")
+  MFA_TICKET=$(echo "$LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin)['ticket'])")
+  if [ -n "$MFA_SECRET" ]; then
+    MFA_CODE=$(TOTP_SECRET="$MFA_SECRET" python3 -c "
+import hmac,hashlib,base64,struct,time,os
+sec=os.environ['TOTP_SECRET']; pad='='*(-len(sec)%8); key=base64.b32decode(sec.upper()+pad)
+c=int(time.time()//30); b=struct.pack('>Q',c)
+h=hmac.new(key,b,hashlib.sha1).digest(); o=h[-1]&15
+print(str((((h[o]&127)<<24)|(h[o+1]<<16)|(h[o+2]<<8)|h[o+3])%10**6).zfill(6))")
+    LOGIN=$($CURL -X POST "$BASE/auth/mfa/verify" -H 'Content-Type: application/json' -d "{\"ticket\":\"$MFA_TICKET\",\"code\":\"$MFA_CODE\"}")
+  fi
+fi
 echo "$LOGIN" | python3 -c "import json,sys; d=json.load(sys.stdin); print('کاربر:', d['user']['name'], '| نقش:', d['user']['roleLabel'])" 2>/dev/null || { echo "$LOGIN"; exit 1; }
 
 echo ""
@@ -735,3 +750,292 @@ print('✓ تنظیمات به پیش‌فرض بازگشت — اجراهای �
 
 echo ""
 echo "✓✓ تست انتها به انتها کامل شد — datasetId=$DSID | reportId=$RID"
+
+# ═══════════════ فاز هفتم: SSO/MFA (۲۹)، اتصال منابع خارجی (۳۱)، صف پردازش خروجی (۳۰.۲) ═══════════════
+
+echo ""
+echo "═══ ۳۱) ورود یکپارچه سازمانی و احراز هویت دوعاملی — بخش ۲۹ ═══"
+
+echo "── ۳۱.۱) MFA: تولید کلید، کد نادرست رد و کد صحیح فعال می‌شود ──"
+MFA_SETUP=$($CURL -X POST "$BASE/auth/mfa/setup" -H 'Content-Type: application/json' -d '{}')
+MFA_SECRET=$(echo "$MFA_SETUP" | python3 -c "import json,sys; print(json.load(sys.stdin)['secret'])")
+echo "$MFA_SECRET" > /tmp/e2e_mfa_secret.txt
+echo "$MFA_SETUP" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['secret'] and len(d['secret']) >= 24, 'کلید TOTP تولید نشد'
+assert d['otpauth'].startswith('otpauth://totp/'), 'آدرس otpauth نامعتبر است'
+assert d['qr'].startswith('data:image/png;base64,'), 'تصویر QR تولید نشد'
+print('✓ کلید Base32 + آدرس otpauth + تصویر QR تولید شد')"
+$CURL -X POST "$BASE/auth/mfa/enable" -H 'Content-Type: application/json' -d '{"code":"000000"}' -w " [HTTP %{http_code}]" | python3 -c "
+import sys
+s=sys.stdin.read()
+assert '401' in s, 'کد نادرست باید رد شود'
+print('✓ کد نادرست رد شد (HTTP 401)')"
+TOTP_CODE=$(TOTP_SECRET="$MFA_SECRET" python3 -c "
+import hmac,hashlib,base64,struct,time,os
+sec=os.environ['TOTP_SECRET']; pad='='*(-len(sec)%8); key=base64.b32decode(sec.upper()+pad)
+c=int(time.time()//30); b=struct.pack('>Q',c)
+h=hmac.new(key,b,hashlib.sha1).digest(); o=h[-1]&15
+print(str((((h[o]&127)<<24)|(h[o+1]<<16)|(h[o+2]<<8)|h[o+3])%10**6).zfill(6))")
+$CURL -X POST "$BASE/auth/mfa/enable" -H 'Content-Type: application/json' -d "{\"code\":\"$TOTP_CODE\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['enabled'] is True, 'MFA فعال نشد'
+print('✓ MFA با کد معتبر TOTP فعال شد (بخش ۲۹ سند: نقش‌های حساس)')"
+$CURL "$BASE/users" | python3 -c "
+import json,sys
+users=json.load(sys.stdin)
+u=[x for x in users if x['username']=='admin'][0]
+assert u['mfaEnabled'] is True, 'وضعیت MFA در فهرست کاربران منعکس نشد'
+print('✓ وضعیت MFA در مدیریت کاربران قابل مشاهده است')"
+
+echo "── ۳۱.۲) ورود دوعاملی: گذرواژه ← بلیت ← کد ──"
+MFA_LOGIN=$($CURL -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123"}')
+MFA_TICKET=$(echo "$MFA_LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin)['ticket'])")
+echo "$MFA_LOGIN" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d.get('mfaRequired') is True and d.get('ticket'), 'ورود باید به گام دوم برود'
+print('✓ با MFA فعال، نشست مستقیم صادر نمی‌شود — بلیت کوتاه‌عمر صادر شد')"
+$CURL -X POST "$BASE/auth/mfa/verify" -H 'Content-Type: application/json' -d "{\"ticket\":\"$MFA_TICKET\",\"code\":\"000000\"}" -w " [HTTP %{http_code}]" | python3 -c "
+import sys
+s=sys.stdin.read()
+assert '401' in s, 'کد نادرست در گام دوم باید رد شود'
+print('✓ کد نادرست در گام دوم رد شد')"
+TOTP_CODE2=$(TOTP_SECRET="$MFA_SECRET" python3 -c "
+import hmac,hashlib,base64,struct,time,os
+sec=os.environ['TOTP_SECRET']; pad='='*(-len(sec)%8); key=base64.b32decode(sec.upper()+pad)
+c=int(time.time()//30); b=struct.pack('>Q',c)
+h=hmac.new(key,b,hashlib.sha1).digest(); o=h[-1]&15
+print(str((((h[o]&127)<<24)|(h[o+1]<<16)|(h[o+2]<<8)|h[o+3])%10**6).zfill(6))")
+$CURL -X POST "$BASE/auth/mfa/verify" -H 'Content-Type: application/json' -d "{\"ticket\":\"$MFA_TICKET\",\"code\":\"$TOTP_CODE2\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['user']['role'] == 'admin', 'ورود دوعاملی به نشست کامل منجر نشد'
+print('✓ کد معتبر → نشست کامل صادر شد (ورود دو مرحله‌ای کامل)')"
+
+echo "── ۳۱.۳) بازنشانی MFA توسط مدیر + غیرفعال‌سازی با کد ──"
+TOTP_CODE3=$(TOTP_SECRET="$MFA_SECRET" python3 -c "
+import hmac,hashlib,base64,struct,time,os
+sec=os.environ['TOTP_SECRET']; pad='='*(-len(sec)%8); key=base64.b32decode(sec.upper()+pad)
+c=int(time.time()//30); b=struct.pack('>Q',c)
+h=hmac.new(key,b,hashlib.sha1).digest(); o=h[-1]&15
+print(str((((h[o]&127)<<24)|(h[o+1]<<16)|(h[o+2]<<8)|h[o+3])%10**6).zfill(6))")
+$CURL -X POST "$BASE/auth/mfa/disable" -H 'Content-Type: application/json' -d "{\"code\":\"$TOTP_CODE3\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['enabled'] is False, 'غیرفعال‌سازی انجام نشد'
+print('✓ غیرفعال‌سازی با تأیید کد انجام شد (امنیت: غیرفعال‌سازی هم نیازمند کد است)')"
+$CURL -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123"}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['user']['role'] == 'admin', 'پس از غیرفعال‌سازی ورود عادی باید انجام شود'
+print('✓ ورود عادی بدون MFA برقرار است')"
+
+echo "── ۳۱.۴) SSO: وضعیت عمومی، شروع جریان، محافظت state ──"
+# خودترمیمی: هر وضعیت باقی‌مانده از اجرای قبلی پاک می‌شود
+$CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d '{"ssoEnabled":false}' > /dev/null
+$CURL "$BASE/auth/sso/status" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['enabled'] is False, 'SSO باید پیش از پیکربندی غیرفعال باشد'
+print('✓ وضعیت SSO عمومی: غیرفعال')"
+$CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d '{"ssoEnabled":true,"ssoIssuer":"","ssoClientId":"e2e-client","ssoClientSecret":"e2e-secret-123","ssoAuthorizeUrl":"https://sso.example.org/authorize","ssoTokenUrl":"https://sso.example.org/token","ssoScopes":"openid profile email"}' > /dev/null
+$CURL "$BASE/auth/sso/start" -o /dev/null -w "%{http_code} %{redirect_url}" | python3 -c "
+import sys
+line=sys.stdin.read()
+assert line.startswith('302') or line.startswith('307'), 'شروع SSO باید ریدایرکت باشد (302/307)'
+assert 'client_id=e2e-client' in line and 'state=' in line, 'آدرس authorize باید client_id و state داشته باشد'
+print('✓ هدایت به سامانه هویتی با client_id و state (جریان Authorization Code)')"
+# callback با state نادرست → هدایت خطا (محافظت CSRF — بخش ۲۹)
+$CURL "$BASE/auth/sso/callback?code=x&state=wrong-state" -o /dev/null -w "%{redirect_url}" | python3 -c "
+import sys
+from urllib.parse import unquote
+url=unquote(sys.stdin.read())
+assert 'ssoError=' in url, 'callback با state نادرست باید به خطا هدایت شود'
+print('✓ state نامعتبر رد شد — محافظت CSRF جریان SSO (بخش ۲۹ سند)')"
+$CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d '{"ssoEnabled":false}' > /dev/null
+echo "✓ پیکربندی SSO آزمون و غیرفعال شد — در استقرار سازمانی با IdP واقعی (Keycloak/Azure AD/Google) فعال می‌شود"
+
+echo ""
+echo "═══ ۳۲) اتصال API و پایگاه‌داده خارجی — بخش ۳۱ ═══"
+
+echo "── ۳۲.۱) کنترل دسترسی: مشاهده‌کننده نمی‌تواند اتصال بسازد ──"
+curl -s -c /tmp/conn_viewer.txt -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{"username":"karbar1","password":"ramz1234"}' > /dev/null
+curl -s -b /tmp/conn_viewer.txt -X POST "$BASE/connections" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"غیرمجاز\",\"type\":\"api\",\"config\":{\"url\":\"https://x.example\"}}" -w " [HTTP %{http_code}]" | python3 -c "
+import sys
+s=sys.stdin.read()
+assert '403' in s, 'مشاهده‌کننده باید رد شود'
+print('✓ ساخت اتصال برای نقش مشاهده‌کننده رد شد (کنترل دسترسی — بخش ۲۹)')"
+
+echo "── ۳۲.۲) ایجاد اتصال API به سلامت سرویس + آزمون ──"
+CONN=$($CURL -X POST "$BASE/connections" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"سلامت سرویس (API)\",\"type\":\"api\",\"config\":{\"url\":\"$BASE/health\",\"method\":\"GET\"}}")
+CID=$(echo "$CONN" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+$CURL -X POST "$BASE/connections/$CID/test" -H 'Content-Type: application/json' -d '{}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['result']
+assert d['ok'] is True, f\"اتصال API باید موفق باشد: {d['message']}\"
+assert d['fieldCount'] and d['rowCount'] >= 1, 'فیلدها باید شناسایی شوند'
+print(f\"✓ اتصال API موفق: {d['message']} — {d['fieldCount']} ستون شناسایی شد\")"
+
+echo "── ۳۲.۳) همگام‌سازی → ساخت مجموعه‌داده و همگام‌سازی دوباره → نسخه جدید ──"
+SYNC1=$($CURL -X POST "$BASE/connections/$CID/sync" -H 'Content-Type: application/json' -d '{}')
+SYNC_DSID=$(echo "$SYNC1" | python3 -c "import json,sys; print(json.load(sys.stdin)['datasetId'])")
+echo "$SYNC1" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['created'] is True and d['version'] == 1, 'نخستین همگام‌سازی باید مجموعه‌داده بسازد'
+print('✓', d['message'])"
+$CURL -X POST "$BASE/connections/$CID/sync" -H 'Content-Type: application/json' -d '{}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['created'] is False and d['version'] == 2, 'همگام‌سازی دوم باید نسخه را افزایش دهد'
+print('✓', d['message'], '— گزارش‌ها و روابط حفظ می‌شوند (نسخه‌بندی ۲۴.۳)')"
+
+echo "── ۳۲.۴) پیش‌نمایش + ماسک مقادیر محرمانه پیکربندی ──"
+$CURL -X POST "$BASE/connections/$CID/preview" -H 'Content-Type: application/json' -d '{}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert len(d['rows']) >= 1 and len(d['fields']) >= 3, 'پیش‌نمایش باید سطر و ستون داشته باشد'
+print('✓ پیش‌نمایش:', d['message'], '— سطرها بدون ساخت مجموعه‌داده')"
+$CURL -X POST "$BASE/connections" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"پایگاه‌داده سازمانی\",\"type\":\"postgres\",\"config\":{\"host\":\"127.0.0.1\",\"port\":5499,\"database\":\"sales\",\"user\":\"reporter\",\"password\":\"Ramz-1234\"},\"query\":\"SELECT * FROM sales\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('✓ اتصال PostgreSQL ساخته شد:', d['message'])"
+PGID=$($CURL "$BASE/connections?projectId=$PID" | python3 -c "
+import json,sys
+conns=json.load(sys.stdin)
+c=[x for x in conns if x['name']=='پایگاه‌داده سازمانی'][0]
+print(c['id'])")
+$CURL "$BASE/connections?projectId=$PID" | python3 -c "
+import json,sys
+conns=json.load(sys.stdin)
+c=[x for x in conns if x['name']=='پایگاه‌داده سازمانی'][0]
+assert c['configRaw'] and 'Ramz-1234' not in c['configRaw'], 'گذرواژه باید ماسک شود'
+assert '***' in c['configRaw'], 'ماسک در پیکربندی یافت نشد'
+print('✓ گذرواژه پیکربندی در پاسخ ماسک است (بخش ۲۹ سند)')"
+
+echo "── ۳۲.۵) خطای اتصال پایگاه‌داده با پیام فارسی عملیاتی ──"
+$CURL -X POST "$BASE/connections/$PGID/test" -H 'Content-Type: application/json' -d '{}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['result']
+assert d['ok'] is False, 'اتصال به پورت بسته باید ناموفق باشد'
+assert ('اتصال' in d['message']) or ('مهلت' in d['message']) or ('یافت نشد' in d['message']), 'پیام خطا باید فارسی و عملیاتی باشد: ' + d['message']
+print('✓ خطای اتصال با پیام عملیاتی فارسی:', d['message'][:80])"
+$CURL -X DELETE "$BASE/connections/$PGID" > /dev/null
+echo "✓ اتصال آزمون پایگاه‌داده پاک شد — درایور PostgreSQL بارگذاری و مسیر خطا آزمایش شد"
+
+echo ""
+echo "═══ ۳۳) صف پردازش خروجی حجیم و سلامت سرویس — بخش ۳۰.۲ ═══"
+
+echo "── ۳۳.۱) سلامت سرویس (مانیتورینگ ۳۰.۲) ──"
+$CURL "$BASE/health" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['status'] == 'ok', 'سرویس باید سالم باشد'
+assert d['checks']['database']['status'] == 'ok', 'پایگاه‌داده باید سالم باشد'
+assert 'queue' in d['checks'] and 'scheduler' in d['checks'], 'وضعیت صف و زمان‌بند باید گزارش شود'
+print('✓ سلامت سرویس: پایگاه‌داده، زمان‌بند و صف قابل پایش — uptime:', d['uptimeSec'], 'ثانیه')"
+
+DIM_FIELD=$($CURL "$BASE/datasets/$DSID" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+dims=[f['id'] for f in d['fields'] if f['role'] != 'measure']
+print(dims[0])")
+
+echo "── ۳۳.۲) ثبت کار خروجی Excel در صف و پیگیری تا پایان ──"
+JOB1=$($CURL -X POST "$BASE/jobs" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"datasetId\":\"$DSID\",\"format\":\"xlsx\",\"title\":\"گزارش صف e2e\",\"spec\":{\"dimensions\":[\"$DIM_FIELD\"],\"measures\":[{\"agg\":\"sum\"}]}}")
+JID1=$(echo "$JOB1" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+echo "$JOB1" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['id'], 'کار ثبت نشد'
+print('✓ کار در صف ثبت شد (HTTP 202) —', d['message'])"
+for i in $(seq 1 40); do
+  JS=$($CURL "$BASE/jobs/$JID1" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+  [ "$JS" = "done" ] && break
+  [ "$JS" = "failed" ] && { echo "کار ناموفق شد!"; exit 1; }
+  sleep 1
+done
+$CURL "$BASE/jobs/$JID1" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['status'] == 'done', 'کار اکسل باید کامل شود'
+assert d['progress'] == 100 and d['result']['fileName'], 'نتیجه باید ثبت شود'
+assert d['attempts'] == 1 and d['durationMs'] is not None, 'مدت اجرا باید ثبت شود (بخش ۳۰.۲)'
+print(f\"✓ خروجی پس‌زمینه آماده شد: {d['result']['fileName']} ({round(d['result']['size']/1024,1)} کیلوبایت، {d['durationMs']} میلی‌ثانیه)\")"
+
+echo "── ۳۳.۳) دانلود فایل خروجی از صف ──"
+$CURL "$BASE/jobs/$JID1/download" -o /tmp/e2e_job_export.xlsx -w "%{http_code}" | python3 -c "
+import sys
+assert sys.stdin.read().strip() == '200', 'دانلود باید موفق باشد'
+with open('/tmp/e2e_job_export.xlsx','rb') as f: head=f.read(4)
+assert head[:2] == b'PK', 'فایل اکسل باید ZIP معتبر باشد'
+print('✓ فایل خروجی از صف دانلود شد — امضای ZIP معتبر (اکسل)')"
+
+echo "── ۳۳.۴) خروجی PDF از صف ──"
+JOB2=$($CURL -X POST "$BASE/jobs" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"datasetId\":\"$DSID\",\"format\":\"pdf\",\"spec\":{\"dimensions\":[\"$DIM_FIELD\"],\"measures\":[{\"agg\":\"sum\"}]}}")
+JID2=$(echo "$JOB2" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+for i in $(seq 1 40); do
+  JS=$($CURL "$BASE/jobs/$JID2" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+  [ "$JS" = "done" ] && break
+  [ "$JS" = "failed" ] && { echo "کار PDF ناموفق شد!"; exit 1; }
+  sleep 1
+done
+$CURL "$BASE/jobs/$JID2/download" -o /tmp/e2e_job_export.pdf
+python3 -c "
+with open('/tmp/e2e_job_export.pdf','rb') as f: head=f.read(5)
+assert head == b'%PDF-', 'فایل PDF معتبر نیست'
+print('✓ خروجی PDF پس‌زمینه معتبر است (%PDF)')"
+
+echo "── ۳۳.۵) شکست پردازش، تلاش مجدد خودکار و اعلان (۳۰.۲ + ۲۶.۲) ──"
+JOB3=$($CURL -X POST "$BASE/jobs" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"datasetId\":\"$DSID\",\"format\":\"docx\",\"spec\":{\"dimensions\":[],\"measures\":[{\"agg\":\"count\"}]}}")
+JID3=$(echo "$JOB3" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+for i in $(seq 1 60); do
+  JS=$($CURL "$BASE/jobs/$JID3" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+  [ "$JS" = "failed" ] && break
+  [ "$JS" = "done" ] && { echo "قالب نامعتبر نباید موفق شود!"; exit 1; }
+  sleep 1
+done
+$CURL "$BASE/jobs/$JID3" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['status'] == 'failed', 'قالب نامعتبر باید شکست بخورد'
+assert d['attempts'] == 2, f\"باید دو تلاش (اجرای مجدد خودکار) ثبت شود — got {d['attempts']}\"
+assert d['error'] and 'قالب' in d['error'], 'علت شکست باید ثبت شود (بخش ۳۰.۲)'
+assert d['durationMs'] is not None, 'مدت تا شکست باید ثبت شود'
+print('✓ شکست با تلاش مجدد خودکار امن: ', d['error'][:60])"
+$CURL "$BASE/notifications?projectId=$PID&limit=10" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+items=d['items'] if isinstance(d,dict) else d
+n=[x for x in items if x['type']=='processFailure' and 'پس‌زمینه' in x['title']]
+assert n, 'اعلان شکست پردازش باید ثبت شود (۲۶.۲)'
+print('✓ اعلان شکست پردازش پس‌زمینه ثبت شد:', n[0]['title'])"
+
+echo "── ۳۳.۶) تلاش مجدد دستی + حذف پردازش + کنترل دسترسی ──"
+$CURL -X POST "$BASE/jobs/$JID3" -H 'Content-Type: application/json' -d '{}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'صف' in d['message'], 'تلاش مجدد باید کار را به صف برگرداند'
+print('✓ تلاش مجدد دستی (اجرای مجدد امن — بخش ۳۰.۲)')"
+for i in $(seq 1 60); do
+  JS=$($CURL "$BASE/jobs/$JID3" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+  [ "$JS" = "failed" ] && break
+  sleep 1
+done
+$CURL -X DELETE "$BASE/jobs/$JID3" > /dev/null
+$CURL "$BASE/jobs?projectId=$PID" | python3 -c "
+import json,sys
+jobs=json.load(sys.stdin)
+assert all(j['id'] != '$JID3' for j in jobs), 'کار حذف‌شده نباید در فهرست باشد'
+print('✓ حذف پردازش شکست‌خورده انجام شد')"
+curl -s -b /tmp/conn_viewer.txt -X POST "$BASE/jobs" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"datasetId\":\"$DSID\",\"format\":\"xlsx\",\"spec\":{}}" -w " [HTTP %{http_code}]" | python3 -c "
+import sys
+s=sys.stdin.read()
+assert '403' in s, 'مشاهده‌کننده باید رد شود'
+print('✓ ثبت پردازش برای نقش مشاهده‌کننده رد شد (مجوز export.run — بخش ۲۹)')"
+
+echo ""
+echo "✓✓✓ هر ۳۴ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"

@@ -71,7 +71,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
     // فایل یکسان → به‌روزرسانی بی‌معنا (اثر انگشت محتوا — بخش ۷.۱)
     const fp = fingerprintBuffer(buf)
-    const sourceFile = await db.sourceFile.findUnique({ where: { id: ds.fileId } })
+    const sourceFile = ds.fileId ? await db.sourceFile.findUnique({ where: { id: ds.fileId } }) : null
     if (sourceFile && sourceFile.fingerprint === fp) {
       return fail('فایل بارگذاری‌شده با فایل فعلی مجموعه‌داده یکسان است (تشخیص با اثر انگشت محتوا — بخش ۷.۱ سند).')
     }
@@ -268,7 +268,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     } catch {
       // اثر انگشت تکراری در پروژه (فایل مشابه قبلاً مستقل بارگذاری شده) — مانع به‌روزرسانی نیست
       warnings.push('این فایل قبلاً در پروژه ثبت شده بود؛ نسخه جدیدی از فایل ایجاد نشد و داده همان فایل قبلی مبنا قرار گرفت.')
-      newFileId = ds.fileId
+      newFileId = ds.fileId ?? undefined
     }
 
     const newVersion = ds.version + 1
