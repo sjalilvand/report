@@ -1,22 +1,32 @@
 // API گزارش‌ها — بخش ۱۹ و ۲۴.۳ سند
 // ذخیره طراحی گزارش، نسخه‌بندی و انتشار کنترل‌شده
+// گردش کار تأیید (بخش ۲۶.۱) از مسیر /api/reports/[id]/status انجام می‌شود
 
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { ok, fail, logAudit } from '@/lib/server'
+import { requireUser, requirePerm, errorResponse, can } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
-  const projectId = req.nextUrl.searchParams.get('projectId')
-  if (!projectId) return fail('شناسه پروژه الزامی است.')
-  const reports = await db.report.findMany({
-    where: { projectId },
-    orderBy: { updatedAt: 'desc' },
-  })
-  return ok(reports)
+  try {
+    const user = await requireUser(req)
+    const projectId = req.nextUrl.searchParams.get('projectId')
+    if (!projectId) return fail('شناسه پروژه الزامی است.')
+    // مشاهده‌کننده فقط گزارش‌های منتشرشده را می‌بیند — بخش ۲۹ سند
+    const onlyPublished = !can(user.role, 'report.submit')
+    const reports = await db.report.findMany({
+      where: { projectId, ...(onlyPublished ? { status: 'published' } : {}) },
+      orderBy: { updatedAt: 'desc' },
+    })
+    return ok(reports)
+  } catch (e) {
+    return errorResponse(e)
+  }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await requirePerm(req, 'report.create')
     const body = await req.json()
     const projectId = String(body.projectId ?? '')
     const title = String(body.title ?? '').trim()
@@ -30,12 +40,12 @@ export async function POST(req: NextRequest) {
         description: body.description ? String(body.description) : null,
         config: JSON.stringify(body.config ?? {}),
         status: 'draft',
-        createdBy: 'طراح گزارش',
+        createdBy: user.name,
       },
     })
-    await logAudit(projectId, 'ذخیره گزارش', `گزارش «${title}» به‌عنوان پیش‌نویس ذخیره شد (نسخه ۱)`)
+    await logAudit(projectId, 'ذخیره گزارش', `گزارش «${title}» به‌عنوان پیش‌نویس ذخیره شد (نسخه ۱)`, user.name)
     return ok(report, 201)
-  } catch {
-    return fail('خطا در ذخیره گزارش')
+  } catch (e) {
+    return errorResponse(e)
   }
 }

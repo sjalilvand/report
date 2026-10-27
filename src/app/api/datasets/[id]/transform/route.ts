@@ -6,10 +6,12 @@ import { db } from '@/lib/db'
 import { ok, fail, logAudit, parseJson } from '@/lib/server'
 import { applyTransform, makeStep } from '@/lib/transform'
 import { FieldMeta, DataRow, TransformStep } from '@/lib/types'
+import { requirePerm, errorResponse } from '@/lib/auth'
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   try {
+    await requirePerm(req, 'dataset.edit')
     const body = await req.json()
     const op = String(body.op ?? '')
     const config = (body.config ?? {}) as Record<string, unknown>
@@ -51,7 +53,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       errors: result.errors,
     })
   } catch (e) {
-    return fail(e instanceof Error ? e.message : 'خطا در اعمال تبدیل')
+    return errorResponse(e)
   }
 }
 

@@ -5,10 +5,12 @@ import { db } from '@/lib/db'
 import { ok, fail, logAudit, parseJson } from '@/lib/server'
 import { computeDerivedField } from '@/lib/formula'
 import { FieldMeta, DataRow } from '@/lib/types'
+import { requirePerm, errorResponse } from '@/lib/auth'
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   try {
+    await requirePerm(req, 'dataset.edit')
     const body = await req.json()
     const formula = String(body.formula ?? '').trim()
     const newName = String(body.newName ?? '').trim().replace(/\s+/g, '_')
@@ -46,6 +48,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
     return ok({ field: result.field, preview: result.preview, version: ds.version + 1 }, 201)
   } catch (e) {
-    return fail(e instanceof Error ? e.message : 'خطا در ساخت فیلد')
+    return errorResponse(e)
   }
 }

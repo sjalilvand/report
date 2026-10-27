@@ -18,7 +18,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
 import { formatNumber } from '@/lib/currency'
 import {
-  Upload, FileSpreadsheet, Trash2, Database, AlertTriangle, CheckCircle2,
+  Upload, FileSpreadsheet, Trash2, Database, AlertTriangle, CheckCircle2, FileDown,
   Loader2, Table2, Eye, Layers, Info,
 } from 'lucide-react'
 
@@ -222,6 +222,16 @@ export default function DataView({
               onChange={e => upload(e.target.files)}
               aria-label="انتخاب فایل اکسل"
             />
+          </div>
+          {/* نمونه فایل‌های واقعی — بخش ۳۶ سند: نمونه فایل‌های واقعی برای آزمون */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 p-3">
+            <FileDown className="size-4 text-primary" />
+            <span className="text-xs text-muted-foreground">فاقد فایل سازمانی برای آزمون؟ مجموعه نمونه نامنظم (تراکنش‌ها، مشتریان، محصولات) را دریافت و سناریوی آزمون اتصال را اجرا کنید:</span>
+            <a href="/samples/۱-تراکنش‌های-فروش-مهر-و-آبان.xlsx" download className="text-xs font-medium text-primary hover:underline">تراکنش‌های فروش (دوره ۱)</a>
+            <a href="/samples/۲-تراکنش‌های-فروش-آذر.xlsx" download className="text-xs font-medium text-primary hover:underline">تراکنش‌های فروش (دوره ۲)</a>
+            <a href="/samples/۳-فهرست-مشتریان.xlsx" download className="text-xs font-medium text-primary hover:underline">مشتریان</a>
+            <a href="/samples/۴-فهرست-محصولات.xlsx" download className="text-xs font-medium text-primary hover:underline">محصولات</a>
+            <a href="/samples/سناریوی-آزمون.txt" download className="text-[11px] text-muted-foreground hover:underline">سناریوی آزمون</a>
           </div>
         </CardContent>
       </Card>

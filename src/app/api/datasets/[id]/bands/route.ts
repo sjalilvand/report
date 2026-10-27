@@ -6,10 +6,12 @@ import { db } from '@/lib/db'
 import { ok, fail, logAudit, parseJson } from '@/lib/server'
 import { createBandedField, suggestBands, BandDef } from '@/lib/formula'
 import { FieldMeta, DataRow } from '@/lib/types'
+import { requirePerm, errorResponse } from '@/lib/auth'
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   try {
+    await requirePerm(req, 'dataset.edit')
     const body = await req.json()
     const sourceFieldId = String(body.sourceFieldId ?? '')
     const bands = (body.bands ?? []) as BandDef[]
@@ -42,7 +44,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
     return ok({ field: result.field, coverage: result.coverage, version: ds.version + 1 }, 201)
   } catch (e) {
-    return fail(e instanceof Error ? e.message : 'خطا در بازه‌سازی')
+    return errorResponse(e)
   }
 }
 

@@ -16,9 +16,13 @@ import ProfileView from '@/components/ProfileView'
 import CleaningView from '@/components/CleaningView'
 import ModelView from '@/components/ModelView'
 import ReportBuilder from '@/components/ReportBuilder'
+import ReportWorkflow, { WorkflowUser } from '@/components/ReportWorkflow'
+import RelationsView from '@/components/RelationsView'
+import AdminView from '@/components/AdminView'
+import LoginView, { AppUser } from '@/components/LoginView'
 import {
   FolderKanban, Database, Columns3, Gauge, Wand2, Boxes, BarChart3,
-  ScrollText, ArrowRight, Sparkles, FileCheck2,
+  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut,
 } from 'lucide-react'
 
 interface Project { id: string; name: string; description?: string | null; owner?: string | null; domain?: string | null }
@@ -42,7 +46,7 @@ interface DatasetDetail extends Omit<DatasetRow, 'fields' | 'transforms'> {
   transforms: unknown[]
 }
 
-type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'reports'
+type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'relations' | 'reports' | 'admin'
 
 export default function Home() {
   const [project, setProject] = useState<Project | null>(null)
@@ -50,6 +54,27 @@ export default function Home() {
   const [datasets, setDatasets] = useState<DatasetRow[]>([])
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null)
   const [detail, setDetail] = useState<DatasetDetail | null>(null)
+  const [user, setUser] = useState<AppUser | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+
+  // وضعیت نشست — بخش ۲۹ سند
+  useEffect(() => {
+    api.get<{ user: AppUser | null }>('/api/auth/me')
+      .then(res => setUser(res.user))
+      .catch(() => setUser(null))
+      .finally(() => setAuthLoading(false))
+  }, [])
+
+  const role = user?.role ?? 'viewer'
+  const canEditRelation = ['admin', 'steward', 'analyst'].includes(role)
+
+  const logout = async () => {
+    await api.post('/api/auth/logout', {}).catch(() => undefined)
+    setUser(null)
+    setProject(null)
+    setTab('projects')
+    clearDataset()
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -110,6 +135,26 @@ export default function Home() {
     setDetail(null)
   }
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-emerald-50/60 via-background to-background">
+        <div className="animate-pulse text-sm text-muted-foreground">در حال بررسی نشست…</div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex flex-col bg-gradient-to-b from-emerald-50/60 via-background to-background">
+        <LandingHeader />
+        <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl w-full flex items-center justify-center">
+          <LoginView onLoggedIn={u => { setUser(u); setTab('projects') }} />
+        </main>
+        <Footer />
+      </div>
+    )
+  }
+
   if (!project) {
     return (
       <div className="min-h-screen flex flex-col bg-gradient-to-b from-emerald-50/60 via-background to-background">
@@ -124,7 +169,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      {/* سربرگ برنامه — بخش ۲۲: درج لوگو، سربرگ */}
+      {/* سربرگ برنامه — بخش ۲۲: درج لوگو، سربرگ، نام کاربر و نقش */}
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="container mx-auto px-4 py-3 max-w-7xl">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -141,9 +186,14 @@ export default function Home() {
                 </p>
               </div>
             </div>
-            <Badge variant="outline" className="gap-1.5 text-[10px]">
-              <Sparkles className="size-3" /> سکوی هوشمند گزارش‌ساز — نسخه ۱.۰
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="gap-1.5 text-[10px]">
+                <ShieldCheck className="size-3" /> {user.name} — {user.roleLabel ?? user.role}
+              </Badge>
+              <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={logout}>
+                <LogOut className="size-3.5" /> خروج
+              </Button>
+            </div>
           </div>
 
           {/* ناوبری مراحل — بخش ۶ سند */}
@@ -154,7 +204,9 @@ export default function Home() {
               <TabsTrigger value="profile" className="gap-1.5 text-xs" disabled={!detail}><Gauge className="size-3.5" /> پروفایل و کیفیت</TabsTrigger>
               <TabsTrigger value="cleaning" className="gap-1.5 text-xs" disabled={!detail}><Wand2 className="size-3.5" /> پاک‌سازی</TabsTrigger>
               <TabsTrigger value="model" className="gap-1.5 text-xs" disabled={!detail}><Boxes className="size-3.5" /> مدل و شاخص‌ها</TabsTrigger>
+              <TabsTrigger value="relations" className="gap-1.5 text-xs" disabled={datasets.length < 2}><Network className="size-3.5" /> روابط جداول</TabsTrigger>
               <TabsTrigger value="reports" className="gap-1.5 text-xs" disabled={!detail}><BarChart3 className="size-3.5" /> گزارش‌ساز</TabsTrigger>
+              <TabsTrigger value="admin" className="gap-1.5 text-xs"><ShieldCheck className="size-3.5" /> مدیریت</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -265,18 +317,55 @@ export default function Home() {
           </div>
         )}
 
-        {tab === 'reports' && (
+        {tab === 'relations' && (
           <div className="space-y-4">
             <SectionHead
-              icon={<BarChart3 className="size-4" />}
-              title="طراح گزارش و داشبورد"
-              desc="طراحی بدون کدنویسی با جدول، نمودار، کارت شاخص، فیلترها، گزارش توصیفی، انتشار و خروجی (بخش‌های ۱۹ تا ۲۳ سند)"
+              icon={<Network className="size-4" />}
+              title="محیط بصری اتصال جداول"
+              desc="بوم گرافیکی، انواع رابطه و اتصال، کنترل‌های الزامی پیش از اتصال و جلوگیری از چندبرابرشدن مبالغ (بخش ۱۶ سند)"
             />
-            <ReportBuilder
+            <RelationsView
               projectId={project.id}
               datasets={datasets}
-              selectedDatasetId={activeDatasetId}
-              onSelectDataset={setActiveDatasetId}
+              canEdit={canEditRelation}
+            />
+          </div>
+        )}
+
+        {tab === 'reports' && (
+          <div className="space-y-6">
+            <div className="space-y-4">
+              <SectionHead
+                icon={<BarChart3 className="size-4" />}
+                title="طراح گزارش و داشبورد"
+                desc="طراحی بدون کدنویسی با جدول، نمودار، کارت شاخص، فیلترها، گزارش توصیفی، انتشار و خروجی (بخش‌های ۱۹ تا ۲۳ سند)"
+              />
+              <ReportBuilder
+                projectId={project.id}
+                datasets={datasets}
+                selectedDatasetId={activeDatasetId}
+                onSelectDataset={setActiveDatasetId}
+              />
+            </div>
+            <ReportWorkflow
+              projectId={project.id}
+              user={user as WorkflowUser}
+              datasets={datasets.map(d => ({ id: d.id, name: d.name }))}
+            />
+          </div>
+        )}
+
+        {tab === 'admin' && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<ShieldCheck className="size-4" />}
+              title="مدیریت سامانه، امنیت و ظرفیت"
+              desc="کاربران و نقش‌ها، قواعد دسترسی سطح سطر، سقف‌های ظرفیت و ثبت رویدادها (بخش‌های ۲۹، ۳۰.۱ و ۳۶ سند)"
+            />
+            <AdminView
+              canManageUsers={role === 'admin'}
+              canManageSettings={role === 'admin'}
+              canViewAudit={role === 'admin' || role === 'auditor'}
             />
           </div>
         )}
@@ -312,7 +401,7 @@ function LandingHeader() {
             <p className="text-xs text-muted-foreground">دریافت منعطف داده + آماده‌سازی قابل ردیابی + مدل‌سازی صحیح + گزارش‌سازی بدون کدنویسی + انتشار امن (بخش ۳۷ سند)</p>
           </div>
         </div>
-        <Badge variant="secondary">نسخه ۱.۰ — فازهای صفر تا سه سند</Badge>
+        <Badge variant="secondary">نسخه ۱.۱ — فازهای صفر تا پنجم سند</Badge>
       </div>
     </header>
   )

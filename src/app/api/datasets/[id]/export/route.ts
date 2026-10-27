@@ -6,6 +6,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { fail, parseJson } from '@/lib/server'
 import { runQuery } from '@/lib/query'
+import { requirePerm, errorResponse, applyRowRules, RowRule, maskValue } from '@/lib/auth'
 import { FieldMeta, DataRow, QuerySpec } from '@/lib/types'
 import * as XLSX from 'xlsx'
 import { toPersianDigits, toLatinDigits } from '@/lib/digits'
@@ -13,6 +14,7 @@ import { toPersianDigits, toLatinDigits } from '@/lib/digits'
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   try {
+    const user = await requirePerm(req, 'export.run')
     const body = await req.json()
     const format = String(body.format ?? 'xlsx')
     const spec: QuerySpec = {
@@ -26,9 +28,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const ds = await db.dataset.findUnique({ where: { id } })
     if (!ds) return fail('مجموعه‌داده یافت نشد.', 404)
     const fields = parseJson<FieldMeta[]>(ds.fields, [])
-    const records = parseJson<DataRow[]>(ds.records, [])
+    // قواعد سطح سطر — بخش ۲۹ سند
+    const records = applyRowRules(parseJson<DataRow[]>(ds.records, []), user.rowRules as RowRule[], ds.id)
 
     const result = runQuery(records, fields, spec)
+
+    // ماسک مقادیر حساس در ابعاد خروجی — بخش ۲۹ سند
+    const sensitiveIds = fields.filter(f => f.sensitivity === 'confidential').map(f => f.id)
 
     // ساخت سطرهای خروجی با برچسب‌های نمایشی
     const fieldById = new Map(fields.map(f => [f.id, f]))
@@ -38,7 +44,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
     const rows = result.rows.map(r => {
       const row: unknown[] = []
-      for (const d of spec.dimensions) row.push(r[d])
+      for (const d of spec.dimensions) {
+        let v = r[d]
+        if (sensitiveIds.includes(d) && v !== null && v !== undefined && String(v) !== '') v = maskValue(v)
+        row.push(v)
+      }
       for (const m of spec.measures) {
         const alias = m.alias ?? ''
         row.push(r[alias])
@@ -98,6 +108,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       },
     })
   } catch (e) {
-    return fail(e instanceof Error ? e.message : 'خطا در تولید خروجی')
+    return errorResponse(e)
   }
 }

@@ -6,12 +6,14 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { ok, fail, logAudit, parseJson } from '@/lib/server'
 import { FieldMeta } from '@/lib/types'
+import { requirePerm, errorResponse } from '@/lib/auth'
 import { toLatinDigits } from '@/lib/digits'
 import { parseDateValue } from '@/lib/jalali'
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
   try {
+    await requirePerm(req, 'dataset.edit')
     const body = await req.json()
     const ds = await db.dataset.findUnique({ where: { id } })
     if (!ds) return fail('مجموعه‌داده یافت نشد.', 404)
@@ -70,7 +72,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     await logAudit(ds.projectId, 'ویرایش ستون', `مشخصات ستون «${f.label}» به‌روزرسانی شد (شناسه پایدار ${f.id} دست‌نخورده ماند)`)
 
     return ok({ field: f, warnings })
-  } catch {
-    return fail('خطا در ویرایش ستون')
+  } catch (e) {
+    return errorResponse(e)
   }
 }

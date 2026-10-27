@@ -6,16 +6,20 @@ import { ok, fail, parseJson } from '@/lib/server'
 import { FieldMeta, DataRow } from '@/lib/types'
 import { toLatinDigits } from '@/lib/digits'
 import { parseDateValue } from '@/lib/jalali'
+import { requireUser, errorResponse, maskRecords, RowRule, applyRowRules } from '@/lib/auth'
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params
-  const fieldId = req.nextUrl.searchParams.get('fieldId')
-  const invalidOnly = req.nextUrl.searchParams.get('invalid') === 'true'
-  const limit = parseInt(req.nextUrl.searchParams.get('limit') ?? '50', 10)
+  try {
+    const user = await requireUser(req)
+    const { id } = await ctx.params
+    const fieldId = req.nextUrl.searchParams.get('fieldId')
+    const invalidOnly = req.nextUrl.searchParams.get('invalid') === 'true'
+    const limit = parseInt(req.nextUrl.searchParams.get('limit') ?? '50', 10)
 
-  const ds = await db.dataset.findUnique({ where: { id } })
-  if (!ds) return fail('مجموعه‌داده یافت نشد.', 404)
-  const records = parseJson<DataRow[]>(ds.records, [])
+    const ds = await db.dataset.findUnique({ where: { id } })
+    if (!ds) return fail('مجموعه‌داده یافت نشد.', 404)
+    // قواعد سطری + ماسک حساس — بخش ۲۹ سند
+    const records = applyRowRules(parseJson<DataRow[]>(ds.records, []), user.rowRules as RowRule[], ds.id)
 
   let out = records
   if (fieldId && invalidOnly) {
@@ -34,5 +38,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       })
     }
   }
-  return ok({ total: out.length, rows: out.slice(0, limit) })
+  const masked = maskRecords(out, parseJson<FieldMeta[]>(ds.fields, []), user.role)
+    return ok({ total: masked.length, rows: masked.slice(0, limit) })
+  } catch (e) {
+    return errorResponse(e)
+  }
 }

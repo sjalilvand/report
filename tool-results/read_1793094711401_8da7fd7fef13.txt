@@ -1,0 +1,520 @@
+     1→'use client'
+     2→
+     3→// طراح گزارش و داشبورد — بخش ۱۹ سند
+     4→// جدول، نمودار میله‌ای/خطی/دایره‌ای، کارت شاخص، فیلتر، گزارش توصیفی، انتشار و خروجی
+     5→
+     6→import { useState, useMemo } from 'react'
+     7→import { api } from '@/lib/client'
+     8→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+     9→import { Button } from '@/components/ui/button'
+    10→import { Input } from '@/components/ui/input'
+    11→import { Label } from '@/components/ui/label'
+    12→import { Badge } from '@/components/ui/badge'
+    13→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    14→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+    15→import { ScrollArea } from '@/components/ui/scroll-area'
+    16→import { Alert, AlertDescription } from '@/components/ui/alert'
+    17→import { Textarea } from '@/components/ui/textarea'
+    18→import { useToast } from '@/hooks/use-toast'
+    19→import { formatNumber, formatAmount, autoDisplayUnit, getUnit, fromBaseRial } from '@/lib/currency'
+    20→import { toPersianDigits } from '@/lib/digits'
+    21→import {
+    22→  Loader2, Play, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Table2,
+    23→  Save, FileDown, FileText, Grid3X3, X, Plus, Kanban,
+    24→} from 'lucide-react'
+    25→import {
+    26→  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
+    27→  Legend, PieChart, Pie, Cell, LineChart, Line,
+    28→} from 'recharts'
+    29→import { FieldMetaClient } from './ColumnsEditor'
+    30→
+    31→interface QueryRow { [k: string]: unknown }
+    32→interface QueryResp {
+    33→  rows: QueryRow[]
+    34→  totals: Record<string, unknown>
+    35→  rowCount: number
+    36→  scannedRecords: number
+    37→  warnings: string[]
+    38→  descriptive?: string
+    39→}
+    40→
+    41→const CHART_COLORS = ['#059669', '#0d9488', '#d97706', '#dc2626', '#7c3aed', '#2563eb', '#be185d', '#65a30d']
+    42→
+    43→export default function ReportBuilder({
+    44→  projectId,
+    45→  datasets,
+    46→  selectedDatasetId,
+    47→  onSelectDataset,
+    48→}: {
+    49→  projectId: string
+    50→  datasets: { id: string; name: string; rowCount: number; fields: string; version: number }[]
+    51→  selectedDatasetId: string | null
+    52→  onSelectDataset: (id: string) => void
+    53→}) {
+    54→  const dataset = datasets.find(d => d.id === selectedDatasetId)
+    55→  const fields: FieldMetaClient[] = dataset ? JSON.parse(dataset.fields || '[]') : []
+    56→  const dims = fields.filter(f => f.role === 'dimension' || f.role === 'attribute' || f.type === 'category' || f.type === 'date')
+    57→  const measures = fields.filter(f => f.role === 'measure')
+    58→
+    59→  const [selDims, setSelDims] = useState<string[]>([])
+    60→  const [selMeasures, setSelMeasures] = useState<{ fieldId?: string; agg: string; displayUnit?: string }[]>([])
+    61→  const [chartType, setChartType] = useState<'table' | 'bar' | 'line' | 'pie' | 'kpi'>('table')
+    62→  const [result, setResult] = useState<QueryResp | null>(null)
+    63→  const [loading, setLoading] = useState(false)
+    64→  const [filterField, setFilterField] = useState('')
+    65→  const [filterOp, setFilterOp] = useState('eq')
+    66→  const [filterValue, setFilterValue] = useState('')
+    67→  const [filters, setFilters] = useState<{ fieldId: string; op: string; value: string }[]>([])
+    68→  const [descriptive, setDescriptive] = useState(false)
+    69→  const [exporting, setExporting] = useState(false)
+    70→  const [saveTitle, setSaveTitle] = useState('')
+    71→  const { toast } = useToast()
+    72→
+    73→  const fieldLabel = (id?: string) => fields.find(f => f.id === id)?.label ?? id ?? ''
+    74→
+    75→  const aliasOf = (m: { fieldId?: string; agg: string }) => {
+    76→    const label = fieldLabel(m.fieldId)
+    77→    const map: Record<string, string> = {
+    78→      sum: `جمع ${label}`, count: 'تعداد رکورد', countDistinct: `${label} متمایز`, avg: `میانگین ${label}`,
+    79→      min: `کمینه ${label}`, max: `بیشینه ${label}`, median: `میانه ${label}`, last: `آخرین ${label}`,
+    80→    }
+    81→    return map[m.agg] ?? label
+    82→  }
+    83→
+    84→  const run = async (opts?: { descriptive?: boolean }) => {
+    85→    if (!dataset) return
+    86→    setLoading(true)
+    87→    setDescriptive(opts?.descriptive ?? false)
+    88→    try {
+    89→      const res = await api.post<QueryResp>(`/api/datasets/${dataset.id}/query`, {
+    90→        dimensions: selDims,
+    91→        measures: selMeasures.length > 0 ? selMeasures.map(m => ({ ...m, alias: aliasOf(m) })) : [{ agg: 'count', alias: 'تعداد رکورد' }],
+    92→        filters: filters.map(f => ({ ...f, op: f.op })),
+    93→        descriptive: opts?.descriptive ?? false,
+    94→        dateField: fields.find(f => f.type === 'date')?.id,
+    95→      })
+    96→      setResult(res)
+    97→      if (res.warnings.length > 0) {
+    98→        toast({ title: 'هشدارهای محاسبه', description: res.warnings.join('؛ ') })
+    99→      }
+   100→    } catch (e) {
+   101→      toast({ title: 'خطا', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+   102→    } finally {
+   103→      setLoading(false)
+   104→    }
+   105→  }
+   106→
+   107→  const addMeasure = () => {
+   108→    const m = measures[0]
+   109→    setSelMeasures(ms => [...ms, { fieldId: m?.id, agg: m ? 'sum' : 'count' }])
+   110→  }
+   111→
+   112→  const exportReport = async (format: 'xlsx' | 'csv') => {
+   113→    if (!dataset) return
+   114→    setExporting(true)
+   115→    try {
+   116→      const res = await fetch(`/api/datasets/${dataset.id}/export`, {
+   117→        method: 'POST',
+   118→        headers: { 'Content-Type': 'application/json' },
+   119→        body: JSON.stringify({
+   120→          format,
+   121→          dimensions: selDims,
+   122→          measures: selMeasures.length > 0 ? selMeasures.map(m => ({ ...m, alias: aliasOf(m) })) : [{ agg: 'count', alias: 'تعداد رکورد' }],
+   123→          filters,
+   124→        }),
+   125→      })
+   126→      if (!res.ok) throw new Error('خطا در تولید خروجی (بخش ۲۳ سند)')
+   127→      const blob = await res.blob()
+   128→      const url = URL.createObjectURL(blob)
+   129→      const a = document.createElement('a')
+   130→      a.href = url
+   131→      a.download = `گزارش.${format === 'csv' ? 'csv' : 'xlsx'}`
+   132→      a.click()
+   133→      URL.revokeObjectURL(url)
+   134→      toast({ title: 'خروجی آماده شد', description: `فایل ${format.toUpperCase()} با ثبت فیلترها، نسخه داده و زمان تولید (بخش ۲۳.۲ سند).` })
+   135→    } catch (e) {
+   136→      toast({ title: 'خطا', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+   137→    } finally {
+   138→      setExporting(false)
+   139→    }
+   140→  }
+   141→
+   142→  const saveReport = async (status: 'draft' | 'confirmed') => {
+   143→    if (!dataset || !saveTitle.trim()) {
+   144→      toast({ title: 'عنوان گزارش الزامی است', variant: 'destructive' })
+   145→      return
+   146→    }
+   147→    try {
+   148→      await api.post('/api/reports', {
+   149→        projectId,
+   150→        datasetId: dataset.id,
+   151→        title: saveTitle,
+   152→        config: { dimensions: selDims, measures: selMeasures, filters, chartType },
+   153→      })
+   154→      toast({ title: status === 'draft' ? 'گزارش به‌عنوان پیش‌نویس ذخیره شد' : 'گزارش ذخیره شد', description: 'نسخه‌بندی گزارش فعال است؛ هر گزارش منتشرشده به نسخه مشخصی از داده ارجاع دارد (بخش ۲۴.۳ سند).' })
+   155→    } catch (e) {
+   156→      toast({ title: 'خطا', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+   157→    }
+   158→  }
+   159→
+   160→  // واحد اختصاصی هر ستون — بخش ۱۹.۴ سند: همه مقادیر ستون با یک واحد نمایش داده می‌شوند
+   161→  const isAmount = selMeasures[0]?.fieldId ? fields.find(f => f.id === selMeasures[0]?.fieldId)?.type === 'amount' : false
+   162→  const amountUnit = useMemo(() => {
+   163→    if (!result || !isAmount || selMeasures.length === 0) return undefined
+   164→    const alias = aliasOf(selMeasures[0])
+   165→    const vals = [
+   166→      ...result.rows.map(r => (typeof r[alias] === 'number' ? Math.abs(r[alias] as number) : 0)),
+   167→      typeof result.totals[alias] === 'number' ? Math.abs(result.totals[alias] as number) : 0,
+   168→    ]
+   169→    const max = Math.max(0, ...vals)
+   170→    return max > 0 ? autoDisplayUnit(max) : undefined
+   171→  }, [result, isAmount, selMeasures])
+   172→
+   173→  // داده نمودار: تبدیل برچسب‌ها و تبدیل واحد نمایش
+   174→  const chartData = useMemo(() => {
+   175→    if (!result || selDims.length === 0 || selMeasures.length === 0) return []
+   176→    const firstMeasure = selMeasures[0]
+   177→    const alias = aliasOf(firstMeasure)
+   178→    return result.rows.slice(0, 12).map(r => ({
+   179→      name: String(r[selDims[0]] ?? '—'),
+   180→      value: typeof r[alias] === 'number'
+   181→        ? (isAmount ? fromBaseRial(r[alias] as number, amountUnit ?? 'rial') : r[alias] as number)
+   182→        : 0,
+   183→    }))
+   184→  }, [result, selDims, selMeasures, isAmount, amountUnit])
+   185→
+   186→  // مقادیر مبلغ به مبنای ریال برگردانده می‌شوند؛ نمایش با واحد مناسب (بخش ۱۴ سند)
+   187→  const fmtVal = (v: number) => isAmount ? formatAmount(v, { displayUnit: amountUnit }) : formatNumber(Math.round(v * 100) / 100)
+   188→  const unitSuffix = (m: { fieldId?: string; agg: string }) => {
+   189→    const f = fields.find(x => x.id === m.fieldId)
+   190→    if (f?.type !== 'amount' || !amountUnit) return ''
+   191→    return ` (${getUnit(amountUnit).label})`
+   192→  }
+   193→
+   194→  if (!dataset) {
+   195→    return (
+   196→      <Card className="border-dashed">
+   197→        <CardContent className="py-16 text-center space-y-3">
+   198→          <Kanban className="size-12 mx-auto text-muted-foreground" />
+   199→          <p className="text-lg font-semibold">گزارش‌ساز</p>
+   200→          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+   201→            ابتدا در برگه «داده‌ها» یک مجموعه‌داده بسازید، سپس از اینجا برای طراحی گزارش استفاده کنید.
+   202→            طراحی با انتخاب فیلدها و کشیدن آن‌ها روی جدول، نمودار و کارت شاخص انجام می‌شود (بخش ۱۹ سند).
+   203→          </p>
+   204→        </CardContent>
+   205→      </Card>
+   206→    )
+   207→  }
+   208→
+   209→  return (
+   210→    <div className="grid gap-4 lg:grid-cols-4">
+   211→      {/* پنل انتخاب فیلدها */}
+   212→      <div className="space-y-4">
+   213→        <Card>
+   214→          <CardHeader className="pb-3">
+   215→            <CardTitle className="text-sm">مجموعه‌داده</CardTitle>
+   216→          </CardHeader>
+   217→          <CardContent>
+   218→            <Select value={selectedDatasetId ?? ''} onValueChange={id => { onSelectDataset(id); setSelDims([]); setSelMeasures([]); setResult(null) }}>
+   219→              <SelectTrigger><SelectValue placeholder="انتخاب" /></SelectTrigger>
+   220→              <SelectContent>
+   221→                {datasets.map(d => <SelectItem key={d.id} value={d.id}>{d.name} ({formatNumber(d.rowCount)} رکورد)</SelectItem>)}
+   222→              </SelectContent>
+   223→            </Select>
+   224→          </CardContent>
+   225→        </Card>
+   226→
+   227→        <Card>
+   228→          <CardHeader className="pb-3">
+   229→            <CardTitle className="flex items-center gap-2 text-sm"><Grid3X3 className="size-4" /> ابعاد (گروه‌بندی)</CardTitle>
+   230→            <CardDescription className="text-xs">انتخاب فیلد و کشیدن روی گزارش (Drag & Drop — بخش ۱۹.۱)</CardDescription>
+   231→          </CardHeader>
+   232→          <CardContent className="space-y-2">
+   233→            <div className="flex flex-wrap gap-1.5">
+   234→              {dims.map(f => (
+   235→                <button
+   236→                  key={f.id}
+   237→                  onClick={() => setSelDims(s => s.includes(f.id) ? s.filter(x => x !== f.id) : [...s, f.id])}
+   238→                  className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${selDims.includes(f.id) ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
+   239→                >
+   240→                  {f.label}
+   241→                </button>
+   242→              ))}
+   243→              {dims.length === 0 && <p className="text-xs text-muted-foreground">بُعدی یافت نشد؛ نقش ستون‌ها را در برگه ستون‌ها تنظیم کنید.</p>}
+   244→            </div>
+   245→          </CardContent>
+   246→        </Card>
+   247→
+   248→        <Card>
+   249→          <CardHeader className="pb-3">
+   250→            <CardTitle className="flex items-center gap-2 text-sm justify-between">
+   251→              <span className="flex items-center gap-2"><BarChart3 className="size-4" /> سنجه‌ها</span>
+   252→              <Button variant="ghost" size="sm" className="h-6 gap-1 text-xs" onClick={addMeasure}><Plus className="size-3" /> افزودن</Button>
+   253→            </CardTitle>
+   254→          </CardHeader>
+   255→          <CardContent className="space-y-2">
+   256→            {selMeasures.map((m, i) => (
+   257→              <div key={i} className="rounded-lg border p-2 space-y-1.5">
+   258→                <div className="flex items-center gap-1">
+   259→                  <Select value={m.fieldId ?? ''} onValueChange={v => setSelMeasures(ms => ms.map((x, j) => j === i ? { ...x, fieldId: v } : x))}>
+   260→                    <SelectTrigger className="h-7 text-xs flex-1"><SelectValue /></SelectTrigger>
+   261→                    <SelectContent>
+   262→                      {measures.map(f => <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>)}
+   263→                    </SelectContent>
+   264→                  </Select>
+   265→                  <Select value={m.agg} onValueChange={v => setSelMeasures(ms => ms.map((x, j) => j === i ? { ...x, agg: v } : x))}>
+   266→                    <SelectTrigger className="h-7 text-xs w-28"><SelectValue /></SelectTrigger>
+   267→                    <SelectContent>
+   268→                      <SelectItem value="sum">جمع</SelectItem>
+   269→                      <SelectItem value="avg">میانگین</SelectItem>
+   270→                      <SelectItem value="count">تعداد رکورد</SelectItem>
+   271→                      <SelectItem value="countDistinct">تعداد متمایز</SelectItem>
+   272→                      <SelectItem value="min">کمینه</SelectItem>
+   273→                      <SelectItem value="max">بیشینه</SelectItem>
+   274→                      <SelectItem value="median">میانه</SelectItem>
+   275→                    </SelectContent>
+   276→                  </Select>
+   277→                  <Button variant="ghost" size="icon" className="size-7 shrink-0" onClick={() => setSelMeasures(ms => ms.filter((_, j) => j !== i))} aria-label="حذف سنجه">
+   278→                    <X className="size-3" />
+   279→                  </Button>
+   280→                </div>
+   281→              </div>
+   282→            ))}
+   283→            {selMeasures.length === 0 && <p className="text-xs text-muted-foreground">سنجه‌ای انتخاب نشده؛ «تعداد رکورد» محاسبه می‌شود.</p>}
+   284→          </CardContent>
+   285→        </Card>
+   286→
+   287→        <Card>
+   288→          <CardHeader className="pb-3"><CardTitle className="text-sm">فیلتر سراسری (بخش ۱۹.۳)</CardTitle></CardHeader>
+   289→          <CardContent className="space-y-2">
+   290→            {filters.map((f, i) => (
+   291→              <div key={i} className="flex items-center gap-1 text-xs">
+   292→                <Badge variant="secondary" className="flex-1 truncate">
+   293→                  {fieldLabel(f.fieldId)} {(opLabels as Record<string, string>)[f.op]} «{f.value}»
+   294→                </Badge>
+   295→                <Button variant="ghost" size="icon" className="size-6" onClick={() => setFilters(fs => fs.filter((_, j) => j !== i))}><X className="size-3" /></Button>
+   296→              </div>
+   297→            ))}
+   298→            <Select value={filterField} onValueChange={setFilterField}>
+   299→              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="ستون فیلتر" /></SelectTrigger>
+   300→              <SelectContent>{fields.map(f => <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>)}</SelectContent>
+   301→            </Select>
+   302→            <div className="flex gap-1">
+   303→              <Select value={filterOp} onValueChange={setFilterOp}>
+   304→                <SelectTrigger className="h-8 text-xs w-24"><SelectValue /></SelectTrigger>
+   305→                <SelectContent>
+   306→                  {['eq', 'neq', 'contains', 'gt', 'lt'].map(o => <SelectItem key={o} value={o}>{(opLabels as Record<string, string>)[o]}</SelectItem>)}
+   307→                </SelectContent>
+   308→              </Select>
+   309→              <Input className="h-8 text-xs flex-1" value={filterValue} onChange={e => setFilterValue(e.target.value)} />
+   310→            </div>
+   311→            <Button
+   312→              variant="outline" size="sm" className="w-full h-7 text-xs gap-1"
+   313→              disabled={!filterField}
+   314→              onClick={() => { setFilters(fs => [...fs, { fieldId: filterField, op: filterOp, value: filterValue }]); setFilterValue('') }}
+   315→            >
+   316→              <Plus className="size-3" /> افزودن فیلتر
+   317→            </Button>
+   318→          </CardContent>
+   319→        </Card>
+   320→      </div>
+   321→
+   322→      {/* ناحیه گزارش */}
+   323→      <div className="lg:col-span-3 space-y-4">
+   324→        <Card>
+   325→          <CardHeader className="pb-3">
+   326→            <div className="flex flex-wrap items-center justify-between gap-2">
+   327→              <CardTitle className="text-base">طرح گزارش</CardTitle>
+   328→              <div className="flex flex-wrap items-center gap-2">
+   329→                <Select value={chartType} onValueChange={v => setChartType(v as typeof chartType)}>
+   330→                  <SelectTrigger className="h-8 w-36 text-xs"><SelectValue /></SelectTrigger>
+   331→                  <SelectContent>
+   332→                    <SelectItem value="table"><span className="flex items-center gap-1.5"><Table2 className="size-3.5" /> جدول</span></SelectItem>
+   333→                    <SelectItem value="bar"><span className="flex items-center gap-1.5"><BarChart3 className="size-3.5" /> میله‌ای/ستونی</span></SelectItem>
+   334→                    <SelectItem value="line"><span className="flex items-center gap-1.5"><LineChartIcon className="size-3.5" /> خطی</span></SelectItem>
+   335→                    <SelectItem value="pie"><span className="flex items-center gap-1.5"><PieChartIcon className="size-3.5" /> دایره‌ای</span></SelectItem>
+   336→                    <SelectItem value="kpi"><span className="flex items-center gap-1.5"><Kanban className="size-3.5" /> کارت شاخص</span></SelectItem>
+   337→                  </SelectContent>
+   338→                </Select>
+   339→                <Button onClick={() => run()} disabled={loading} className="h-8 gap-1.5 text-xs">
+   340→                  {loading ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} اجرای گزارش
+   341→                </Button>
+   342→              </div>
+   343→            </div>
+   344→            <CardDescription>
+   345→              نوع تجمیع، واحد و فیلتر هر شاخص قابل مشاهده است — شفافیت محاسبات (بخش ۴ سند)
+   346→            </CardDescription>
+   347→          </CardHeader>
+   348→          <CardContent>
+   349→            {!result ? (
+   350→              <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+   351→                <BarChart3 className="size-10 text-muted-foreground" />
+   352→                <p className="text-sm text-muted-foreground">ابعاد و سنجه‌ها را انتخاب و گزارش را اجرا کنید</p>
+   353→              </div>
+   354→            ) : (
+   355→              <div className="space-y-3">
+   356→                {/* کارت شاخص — بخش ۱۹.۲ */}
+   357→                {chartType === 'kpi' ? (
+   358→                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+   359→                    {selMeasures.map((m, i) => {
+   360→                      const alias = aliasOf(m)
+   361→                      const val = result.totals[alias]
+   362→                      return (
+   363→                        <Card key={i} className="bg-gradient-to-bl from-emerald-50 to-transparent dark:from-emerald-950/30">
+   364→                          <CardContent className="pt-5">
+   365→                            <p className="text-xs text-muted-foreground">{alias}</p>
+   366→                            <p className="text-2xl font-bold mt-1 tabular-nums">{typeof val === 'number' ? formatAmount(val, { autoUnitLabel: true }) : '—'}</p>
+   367→                            {isAmount && <p className="text-[10px] text-muted-foreground mt-1">مبنای ذخیره‌سازی: ریال؛ نمایش با واحد مناسب (بخش ۱۴ سند)</p>}
+   368→                          </CardContent>
+   369→                        </Card>
+   370→                      )
+   371→                    })}
+   372→                    {selMeasures.length === 0 && (
+   373→                      <Card><CardContent className="pt-5"><p className="text-xs text-muted-foreground">تعداد کل رکوردها</p><p className="text-2xl font-bold mt-1">{formatNumber(result.scannedRecords)}</p></CardContent></Card>
+   374→                    )}
+   375→                  </div>
+   376→                ) : chartType === 'table' ? (
+   377→                  <div className="rounded-lg border max-h-[28rem] overflow-auto">
+   378→                    <Table>
+   379→                      <TableHeader className="sticky top-0 bg-background z-10">
+   380→                        <TableRow>
+   381→                          {selDims.map(d => <TableHead key={d}>{fieldLabel(d)}</TableHead>)}
+   382→                          {selMeasures.map((m, i) => <TableHead key={i} className="text-left">{aliasOf(m).replace(/\s*\([^)]*\)\s*$/, '')}{unitSuffix(m)}</TableHead>)}
+   383→                          {selMeasures.length === 0 && <TableHead className="text-left">تعداد رکورد</TableHead>}
+   384→                        </TableRow>
+   385→                      </TableHeader>
+   386→                      <TableBody>
+   387→                        {result.rows.map((r, i) => (
+   388→                          <TableRow key={i}>
+   389→                            {selDims.map(d => <TableCell key={d}>{String(r[d] ?? '—')}</TableCell>)}
+   390→                            {selMeasures.map((m, j) => {
+   391→                              const alias = aliasOf(m)
+   392→                              return <TableCell key={j} className="text-left tabular-nums">{typeof r[alias] === 'number' ? fmtVal(r[alias] as number) : '—'}</TableCell>
+   393→                            })}
+   394→                            {selMeasures.length === 0 && <TableCell className="text-left tabular-nums">1</TableCell>}
+   395→                          </TableRow>
+   396→                        ))}
+   397→                        {/* جمع کل از مقادیر دقیق — بخش ۱۴.۴ */}
+   398→                        <TableRow className="font-bold bg-muted/50">
+   399→                          <TableCell colSpan={selDims.length || 1}>جمع کل</TableCell>
+   400→                          {selMeasures.map((m, j) => {
+   401→                            const alias = aliasOf(m)
+   402→                            const v = result.totals[alias]
+   403→                            return <TableCell key={j} className="text-left tabular-nums">{typeof v === 'number' ? fmtVal(v) : '—'}</TableCell>
+   404→                          })}
+   405→                          {selMeasures.length === 0 && <TableCell className="text-left">{formatNumber(result.scannedRecords)}</TableCell>}
+   406→                        </TableRow>
+   407→                      </TableBody>
+   408→                    </Table>
+   409→                  </div>
+   410→                ) : (
+   411→                  <div className="h-96 rounded-lg border p-4">
+   412→                    <ResponsiveContainer width="100%" height="100%">
+   413→                      {chartType === 'bar' ? (
+   414→                        <BarChart data={chartData} margin={{ top: 8, bottom: 40 }}>
+   415→                          <CartesianGrid strokeDasharray="3 3" stroke="#8884" />
+   416→                          <XAxis dataKey="name" tick={{ fontSize: 11 }} angle={-25} textAnchor="end" height={70} />
+   417→                          <YAxis tick={{ fontSize: 11 }} tickFormatter={v => formatNumber(v as number)} width={90} />
+   418→                          <RTooltip formatter={v => fmtVal(v as number)} />
+   419→                          <Bar dataKey="value" fill={CHART_COLORS[0]} radius={[6, 6, 0, 0]} />
+   420→                        </BarChart>
+   421→                      ) : chartType === 'line' ? (
+   422→                        <LineChart data={chartData} margin={{ top: 8, bottom: 40 }}>
+   423→                          <CartesianGrid strokeDasharray="3 3" stroke="#8884" />
+   424→                          <XAxis dataKey="name" tick={{ fontSize: 11 }} angle={-25} textAnchor="end" height={70} />
+   425→                          <YAxis tick={{ fontSize: 11 }} tickFormatter={v => formatNumber(v as number)} width={90} />
+   426→                          <RTooltip formatter={v => fmtVal(v as number)} />
+   427→                          <Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2.5} dot={{ r: 4 }} />
+   428→                        </LineChart>
+   429→                      ) : (
+   430→                        <PieChart>
+   431→                          <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={120} innerRadius={50} paddingAngle={2} label={d => d.name}>
+   432→                            {chartData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+   433→                          </Pie>
+   434→                          <RTooltip formatter={v => fmtVal(v as number)} />
+   435→                          <Legend wrapperStyle={{ fontSize: 11 }} />
+   436→                        </PieChart>
+   437→                      )}
+   438→                    </ResponsiveContainer>
+   439→                  </div>
+   440→                )}
+   441→
+   442→                {/* نمودار دایره‌ای با محدودیت تعداد دسته — بخش ۱۹.۲ */}
+   443→                {chartType === 'pie' && chartData.length > 10 && (
+   444→                  <p className="text-xs text-amber-600">نمودار دایره‌ای برای بیش از ۱۰ دسته توصیه نمی‌شود؛ ۱۲ دسته برتر نمایش داده شد (بخش ۱۹.۲ سند).</p>
+   445→                )}
+   446→
+   447→                {/* هشدارهای محاسبه */}
+   448→                {result.warnings.length > 0 && (
+   449→                  <Alert>
+   450→                    <AlertDescription>
+   451→                      <ul className="list-disc ps-4 text-xs space-y-1">
+   452→                        {result.warnings.map((w, i) => <li key={i}>{w}</li>)}
+   453→                      </ul>
+   454→                    </AlertDescription>
+   455→                  </Alert>
+   456→                )}
+   457→
+   458→                <p className="text-[10px] text-muted-foreground">
+   459→                  {formatNumber(result.scannedRecords)} رکورد بررسی شد | {formatNumber(result.rowCount)} سطر نتیجه
+   460→                </p>
+   461→              </div>
+   462→            )}
+   463→          </CardContent>
+   464→        </Card>
+   465→
+   466→        {/* گزارش توصیفی — بخش ۲۰ سند */}
+   467→        <Card>
+   468→          <CardHeader className="pb-3">
+   469→            <CardTitle className="flex items-center gap-2 text-base"><FileText className="size-4" /> گزارش توصیفی قالبی</CardTitle>
+   470→            <CardDescription className="text-xs">
+   471→              متن از داده و محاسبات تأییدشده تولید می‌شود و اعداد آن با جدول و نمودار سازگارند (بخش ۲۰ سند)
+   472→            </CardDescription>
+   473→          </CardHeader>
+   474→          <CardContent className="space-y-3">
+   475→            <Button variant="outline" size="sm" onClick={() => run({ descriptive: true })} disabled={loading || !result} className="gap-1.5 text-xs">
+   476→              <FileText className="size-3.5" /> تولید پیش‌نویس متن توصیفی
+   477→            </Button>
+   478→            {result?.descriptive && (
+   479→              <Textarea readOnly rows={7} value={result.descriptive} className="text-xs leading-6 bg-muted/30" />
+   480→            )}
+   481→          </CardContent>
+   482→        </Card>
+   483→
+   484→        {/* ذخیره، انتشار و خروجی — بخش ۲۳ */}
+   485→        <Card>
+   486→          <CardHeader className="pb-3"><CardTitle className="text-base">ذخیره، انتشار و خروجی</CardTitle></CardHeader>
+   487→          <CardContent className="space-y-3">
+   488→            <div className="flex flex-wrap items-end gap-2">
+   489→              <div className="space-y-1.5 flex-1 min-w-48">
+   490→                <Label className="text-xs">عنوان گزارش برای ذخیره</Label>
+   491→                <Input value={saveTitle} onChange={e => setSaveTitle(e.target.value)} placeholder="مثال: گزارش عملکرد فصلی" className="h-8" />
+   492→              </div>
+   493→              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport('draft')}><Save className="size-3.5" /> ذخیره پیش‌نویس</Button>
+   494→              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport('confirmed')}><Save className="size-3.5" /> ذخیره تأییدشده</Button>
+   495→            </div>
+   496→            <div className="flex flex-wrap gap-2">
+   497→              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => exportReport('xlsx')} disabled={exporting || !result}>
+   498→                <FileDown className="size-3.5" /> خروجی Excel
+   499→              </Button>
+   500→              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => exportReport('csv')} disabled={exporting || !result}>
+   501→                <FileDown className="size-3.5" /> خروجی CSV
+   502→              </Button>
+   503→              <span className="text-[10px] text-muted-foreground self-center">
+   504→                خروجی فیلترها، نسخه داده و زمان تولید را ثبت می‌کند؛ مجموع خروجی با گزارش منطبق است (بخش ۲۳.۲ سند).
+   505→              </span>
+   506→            </div>
+   507→          </CardContent>
+   508→        </Card>
+   509→      </div>
+   510→    </div>
+   511→  )
+   512→}
+   513→
+   514→const opLabels = {
+   515→  eq: 'برابر', neq: 'نابرابر', contains: 'شامل', gt: 'بزرگ‌تر', lt: 'کوچک‌تر',
+   516→} as const
+   517→
+   518→// اعداد فارسی برای نمایش ارقام (قابل تنظیم — بخش ۲۲ سند)
+   519→export { toPersianDigits }
+   520→

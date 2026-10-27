@@ -24,6 +24,7 @@ model Project {
   reports     Report[]
   measures    MeasureDefinition[]
   auditEvents AuditEvent[]
+  relations   Relation[]
 }
 
 // فایل منبع — SourceFile در بخش ۲۸ سند
@@ -103,12 +104,13 @@ model Report {
   title       String
   description String?
   config      String   @default("{}") // JSON: اجزای گزارش (جدول، نمودار، کارت شاخص، فیلترها)
-  status      String   @default("draft") // draft | confirmed | published — بخش ۲۶.۱
+  status      String   @default("draft") // draft | pending | approved | published | rejected — گردش کار تأیید بخش ۲۶.۱
   createdBy   String?
   publishedAt DateTime?
   version     Int      @default(1)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  approvals   ApprovalEvent[]
 
   @@index([projectId])
 }
@@ -124,4 +126,78 @@ model AuditEvent {
   createdAt DateTime @default(now())
 
   @@index([projectId])
+}
+
+// کاربر سامانه — بخش ۲.۲ (کاربران هدف) و بخش ۲۹ (کنترل دسترسی مبتنی بر نقش)
+model User {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  name         String
+  passwordHash String    // هش scrypt با نمک تصادفی
+  role         String    @default("viewer") // admin | steward | analyst | viewer | auditor — بخش ۵ سند
+  rowRules     String    @default("[]") // JSON: قواعد دسترسی سطح سطر [{datasetId, fieldId, op, value}] — بخش ۲۹
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+
+  @@index([role])
+}
+
+// نشست ورود — بخش ۲۹ (احراز هویت امن، ابطال دسترسی)
+model Session {
+  id        String   @id @default(cuid()) // توکن تصادفی نشست
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip        String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// رابطه بین جداول — بخش ۱۶ سند (محیط بصری اتصال جداول)
+model Relation {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name            String
+  fromDatasetId   String
+  toDatasetId     String
+  cardinality     String   @default("many-to-one") // one-to-one | one-to-many | many-to-one | many-to-many — بخش ۱۶.۱
+  joinType        String   @default("left") // inner | left | right | full | anti | append — بخش ۱۶.۲
+  columnPairs     String   @default("[]") // JSON: [{fromFieldId, toFieldId}] — کلید ساده یا مرکب
+  status          String   @default("active") // suggested | active | rejected — پذیرش/رد پیشنهاد سامانه
+  filterDirection String   @default("single") // single | both — جهت اثر فیلترها — بخش ۱۶.۳
+  lastCheck       String? // JSON: نتیجه آخرین کنترل پیش از اتصال — بخش ۱۶.۳
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// رویداد گردش کار تأیید گزارش — بخش ۲۶.۱ و ۳۶ (گردش کار تأیید گزارش)
+model ApprovalEvent {
+  id         String   @id @default(cuid())
+  reportId   String
+  report     Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  action     String // submit | approve | reject | publish | unpublish
+  fromStatus String
+  toStatus   String
+  comment    String?
+  actor      String
+  role       String?
+  createdAt  DateTime @default(now())
+
+  @@index([reportId])
+}
+
+// پیکربندی سامانه و سقف ظرفیت — بخش ۳۰.۱ (کارایی و ظرفیت) و ۳۶ (تصمیم‌های پیش از قرارداد)
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }

@@ -139,7 +139,7 @@ export default function ReportBuilder({
     }
   }
 
-  const saveReport = async (status: 'draft' | 'confirmed') => {
+  const saveReport = async (thenSubmit = false) => {
     if (!dataset || !saveTitle.trim()) {
       toast({ title: 'عنوان گزارش الزامی است', variant: 'destructive' })
       return
@@ -151,7 +151,17 @@ export default function ReportBuilder({
         title: saveTitle,
         config: { dimensions: selDims, measures: selMeasures, filters, chartType },
       })
-      toast({ title: status === 'draft' ? 'گزارش به‌عنوان پیش‌نویس ذخیره شد' : 'گزارش ذخیره شد', description: 'نسخه‌بندی گزارش فعال است؛ هر گزارش منتشرشده به نسخه مشخصی از داده ارجاع دارد (بخش ۲۴.۳ سند).' })
+      if (thenSubmit) {
+        // ذخیره و ارسال برای تأیید — گردش کار بخش ۲۶.۱ سند
+        const list = await api.get<{ id: string; title: string; status: string }[]>(`/api/reports?projectId=${projectId}`)
+        const newest = list.find(r => r.title === saveTitle && r.status === 'draft')
+        if (newest) {
+          await api.post(`/api/reports/${newest.id}/status`, { action: 'submit' })
+          toast({ title: 'گزارش ذخیره و برای تأیید ارسال شد', description: 'گردش کار: در انتظار تأیید مدیر داده/سامانه (بخش ۲۶.۱ سند).' })
+        }
+      } else {
+        toast({ title: 'گزارش به‌عنوان پیش‌نویس ذخیره شد', description: 'نسخه‌بندی گزارش فعال است؛ انتشار پس از تأیید انجام می‌شود (بخش‌های ۲۴.۳ و ۲۶.۱ سند).' })
+      }
     } catch (e) {
       toast({ title: 'خطا', description: e instanceof Error ? e.message : '', variant: 'destructive' })
     }
@@ -490,8 +500,8 @@ export default function ReportBuilder({
                 <Label className="text-xs">عنوان گزارش برای ذخیره</Label>
                 <Input value={saveTitle} onChange={e => setSaveTitle(e.target.value)} placeholder="مثال: گزارش عملکرد فصلی" className="h-8" />
               </div>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport('draft')}><Save className="size-3.5" /> ذخیره پیش‌نویس</Button>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport('confirmed')}><Save className="size-3.5" /> ذخیره تأییدشده</Button>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport(false)}><Save className="size-3.5" /> ذخیره پیش‌نویس</Button>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport(true)}><Save className="size-3.5" /> ذخیره و ارسال برای تأیید</Button>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => exportReport('xlsx')} disabled={exporting || !result}>
