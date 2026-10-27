@@ -1,12 +1,12 @@
 ﻿# =============================================================
 #  سکوی هوشمند گزارش‌ساز — توقف سرور
 # -------------------------------------------------------------
-#  کاربرد: بستن سرور در حال اجرا روی پورت مشخص (پیش‌فرض 3000)
+#  کاربرد: بستن سرور در حال اجرا روی پورت مشخص (پیش‌فرض 3015)
 #     powershell -ExecutionPolicy Bypass -File .\stop-report.ps1
 #     powershell -ExecutionPolicy Bypass -File .\stop-report.ps1 -Port 3001
 # =============================================================
 
-param([int]$Port = 3000)
+param([int]$Port = 3015)
 
 try { chcp 65001 | Out-Null; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 

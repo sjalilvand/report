@@ -13,7 +13,7 @@
 #    3) گزینه‌های اختیاری:
 #       -InstallDir "D:\apps\report"   مسیر نصب (پیش‌فرض: پوشه جاری\report)
 #       -RepoUrl    "https://github.com/sjalilvand/report.git"
-#       -Port       3000                پورت اجرا
+#       -Port       3015                پورت اجرا (پیش‌فرض: ۳۰۱۵)
 #       -Production                     اجرای حالت تولید به‌جای توسعه
 #       -SkipClone                      اگر مخزن را قبلاً دانلود کرده‌اید
 #       -NoBrowser                      باز نکردن خودکار مرورگر
@@ -26,7 +26,7 @@
 param(
   [string]$InstallDir = "",
   [string]$RepoUrl = "https://github.com/sjalilvand/report.git",
-  [int]$Port = 3000,
+  [int]$Port = 3015,
   [switch]$SkipClone,
   [switch]$Production,
   [switch]$NoBrowser

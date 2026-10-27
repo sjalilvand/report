@@ -7,13 +7,13 @@
 #  powershell -ExecutionPolicy Bypass -File .\run-report.ps1
 #  (در PowerShell اجرای اسکریپت پوشه جاری باید با «.\» شروع شود)
 #  گزینه‌ها:
-#     -Port 3001          پورت دلخواه
+#     -Port 3016          پورت دلخواه (پیش‌فرض: ۳۰۱۵)
 #     -Production         اجرای حالت تولید (build + start)
 #     -NoBrowser          باز نکردن خودکار مرورگر
 # =============================================================
 
 param(
-  [int]$Port = 3000,
+  [int]$Port = 3015,
   [switch]$Production,
   [switch]$NoBrowser
 )

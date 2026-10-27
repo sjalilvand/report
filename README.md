@@ -30,9 +30,9 @@ Invoke-WebRequest https://raw.githubusercontent.com/sjalilvand/report/main/publi
 powershell -ExecutionPolicy Bypass -File .\setup-and-run.ps1
 ```
 
-گزینه‌های اختیاری: `-InstallDir "D:\apps\report"` (مسیر نصب)، `-Port 3001`، `-Production` (حالت تولید)، `-SkipClone`، `-NoBrowser`.
+گزینه‌های اختیاری: `-InstallDir "D:\apps\report"` (مسیر نصب)، `-Port 3016` (پورت پیش‌فرض: ۳۰۱۵)، `-Production` (حالت تولید)، `-SkipClone`، `-NoBrowser`.
 
-پس از نصب، سه میان‌بر در پوشه نصب و پوشه فراخوانی ساخته می‌شود: `start-report.ps1` (اجرای سریع)، `stop-report.ps1` (توقف سرور) و `update-report.ps1` (به‌روزرسانی از GitHub + نصب وابستگی‌ها + همگام‌سازی دیتابیس).
+پس از نصب، سه میان‌بر در پوشه نصب و پوشه فراخوانی ساخته می‌شود: `start-report.ps1` (اجرای سریع)، `stop-report.ps1` (توقف سرور) و `update-report.ps1` (به‌روزرسانی از GitHub + نصب وابستگی‌ها + همگام‌سازی دیتابیس). برنامه روی **پورت ۳۰۱۵** اجرا می‌شود: `http://localhost:3015` — و از دستگاه‌های دیگر شبکه با `http://<IP-سرور>:3015` در دسترس است.
 
 ### عیب‌یابی ویندوز
 
@@ -41,6 +41,7 @@ powershell -ExecutionPolicy Bypass -File .\setup-and-run.ps1
 | `start-report.ps1 is not recognized as a name of a cmdlet...` | در PowerShell اسکریپت‌های پوشه جاری بدون پیشوند `.\` اجرا نمی‌شوند | دستور را با `.\` شروع کنید: `.\start-report.ps1` |
 | `running scripts is disabled on this system` | سیاست اجرای اسکریپت | `powershell -ExecutionPolicy Bypass -File .\start-report.ps1` |
 | به‌روزرسانی ناموفق با `git pull` | تغییرات محلی روی فایل‌ها | در پوشه پروژه: `git stash` سپس `git pull` (یا `setup-and-run.ps1` را دوباره با «.\» اجرا کنید) |
+| `WebSocket ... /_next/hmr ... ERR_INVALID_HTTP_RESPONSE` و/یا صفحه روی «در حال بررسی نشست…» گیر می‌کند | دسترسی با IP شبکه (مثلاً `192.168.100.5:3015`) — Next.js 16 منابع dev را برای مبدأ غیر localhost مسدود می‌کند | IP سرور باید در `allowedDevOrigins` فایل `next.config.ts` باشد (پیش‌فرض شامل `192.168.100.5` است). اگر IP سرور تغییر کرد، IP جدید را به همان فهرست اضافه و سرور را دوباره اجرا کنید. پس از هر به‌روزرسانی، میان‌برها را دوباره بسازید: `Copy-Item .\public\run-report.ps1 .\start-report.ps1 -Force` و `Copy-Item .\public\stop-report.ps1 .\stop-report.ps1 -Force` |
 
 ```powershell
 # اجرای درست میان‌برها (با نقطه و بک‌اسلش):
@@ -55,10 +56,10 @@ powershell -ExecutionPolicy Bypass -File .\setup-and-run.ps1
 # پیش‌نیاز: Node.js 20+ یا Bun
 npm install        # یا bun install
 npx prisma db push # ایجاد پایگاه‌داده
-npm run dev        # اجرای توسعه روی پورت 3000
+npm run dev        # اجرای توسعه روی پورت 3015
 ```
 
-سپس `http://localhost:3000` را باز کنید.
+سپس `http://localhost:3015` را باز کنید (از دستگاه دیگر شبکه: `http://<IP-سرور>:3015`).
 
 ## ساختار پروژه
 
