@@ -15,6 +15,17 @@ export interface PlatformSettings {
   sessionTimeoutMinutes: number
   multiOrg: boolean            // تک‌سازمانی یا چندسازمانی — تصمیم بخش ۳۶
   currencyBase: string         // واحد مبنای مبلغ — تصمیم بخش ۳۶ (مبنای ریال)
+  // زمان‌بندی خودکار ارزیابی هشدارها — تکمیل بخش ۲۶.۲
+  alertEvalIntervalMinutes: number // فاصله ارزیابی خودکار قواعد هشدار (دقیقه)
+  // کانال ایمیلی هشدارها — بخش ۲۶.۲
+  emailEnabled: boolean        // فعال‌بودن ارسال ایمیلی هشدارها
+  smtpHost: string
+  smtpPort: number
+  smtpSecure: boolean          // TLS مستقیم (۴۶۵) در برابر STARTTLS (۵۸۷)
+  smtpUser: string
+  smtpPass: string             // در پاسخ GET با *** ماسک می‌شود
+  smtpFrom: string             // فرستنده، مثلا: هشدار گزارش‌ساز <alert@example.com>
+  alertEmailTo: string         // گیرندگان، با کاما جدا می‌شوند
 }
 
 // اهداف پیشنهادی اولیه سند — مشروط به آزمون با داده واقعی سازمان (بخش ۳۰.۱ و ۳۷)
@@ -30,6 +41,15 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   sessionTimeoutMinutes: 720,
   multiOrg: false,
   currencyBase: 'rial',
+  alertEvalIntervalMinutes: 60,
+  emailEnabled: false,
+  smtpHost: '',
+  smtpPort: 587,
+  smtpSecure: false,
+  smtpUser: '',
+  smtpPass: '',
+  smtpFrom: '',
+  alertEmailTo: '',
 }
 
 export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
@@ -44,7 +64,20 @@ export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
   sessionTimeoutMinutes: 'مدت اعتبار نشست (دقیقه)',
   multiOrg: 'چندسازمانی',
   currencyBase: 'واحد مبنای مبلغ',
+  alertEvalIntervalMinutes: 'فاصله ارزیابی خودکار هشدارها (دقیقه)',
+  emailEnabled: 'ارسال ایمیلی هشدارها',
+  smtpHost: 'سرور SMTP (مثلاً smtp.example.com)',
+  smtpPort: 'پورت SMTP',
+  smtpSecure: 'اتصال امن مستقیم TLS (پورت ۴۶۵)',
+  smtpUser: 'نام کاربری SMTP',
+  smtpPass: 'گذرواژه SMTP',
+  smtpFrom: 'آدرس فرستنده',
+  alertEmailTo: 'گیرندگان ایمیل هشدار (با کاما)',
 }
+
+// فیلدهایی که در پاسخ GET ماسک می‌شوند — جلوگیری از نشت گذرواژه (بخش ۲۹)
+export const SECRET_SETTINGS: (keyof PlatformSettings)[] = ['smtpPass']
+export const MASK = '***'
 
 export async function getSettings(): Promise<PlatformSettings> {
   try {
@@ -66,8 +99,18 @@ export async function getSettings(): Promise<PlatformSettings> {
     }
     return out
   } catch {
-    return { ...DEFAULT_SETTINGS }
+    const d = { ...DEFAULT_SETTINGS }
+    return d
   }
+}
+
+/** نسخه ماسک‌شده برای پاسخ API */
+export async function getMaskedSettings(): Promise<PlatformSettings> {
+  const s = await getSettings()
+  for (const k of SECRET_SETTINGS) {
+    if (s[k]) (s[k] as string) = MASK
+  }
+  return s
 }
 
 export async function saveSettings(patch: Partial<Record<keyof PlatformSettings, unknown>>): Promise<PlatformSettings> {

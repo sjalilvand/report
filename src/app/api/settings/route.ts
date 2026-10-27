@@ -4,12 +4,12 @@
 import { NextRequest } from 'next/server'
 import { ok, fail, logAudit } from '@/lib/server'
 import { requireUser, requirePerm, errorResponse } from '@/lib/auth'
-import { getSettings, saveSettings, SETTING_LABELS, PlatformSettings } from '@/lib/settings'
+import { getMaskedSettings, saveSettings, SETTING_LABELS, PlatformSettings, SECRET_SETTINGS, MASK, DEFAULT_SETTINGS } from '@/lib/settings'
 
 export async function GET(req: NextRequest) {
   try {
     await requireUser(req)
-    const settings = await getSettings()
+    const settings = await getMaskedSettings()
     return ok({ settings, labels: SETTING_LABELS })
   } catch (e) {
     return errorResponse(e)
@@ -25,18 +25,23 @@ export async function PUT(req: NextRequest) {
     for (const key of defaults) {
       if (body[key] !== undefined) patch[key] = body[key]
     }
-    // اعتبارسنجی اعداد مثبت
+    // مقدار ماسک‌شده (* * *) یعنی تغییر نکرده — گذرواژه فعلی حفظ می‌شود
+    for (const k of SECRET_SETTINGS) {
+      if (patch[k] === MASK) delete patch[k]
+    }
+    // اعتبارسنجی اعداد مثبت — فقط فیلدهای عددی؛ رشتهٔ خالی یعنی پاک‌سازی (SMTP اختیاری است)
     for (const key of defaults) {
       const def = patch[key]
-      if (def === undefined) continue
-      if (typeof def === 'number' || typeof def === 'string') {
-        const n = Number(def)
-        if (Number.isFinite(n) && n <= 0) return fail('مقادیر ظرفیت باید عددی مثبت باشند.')
-      }
+      if (def === undefined || def === '') continue
+      if (typeof DEFAULT_SETTINGS[key] !== 'number') continue
+      const n = Number(def)
+      if (Number.isFinite(n) && n <= 0) return fail('مقادیر ظرفیت باید عددی مثبت باشند.')
     }
     const settings = await saveSettings(patch)
-    await logAudit(null, 'به‌روزرسانی پیکربندی ظرفیت', JSON.stringify(patch), me.name)
-    return ok({ settings, labels: SETTING_LABELS })
+    await logAudit(null, 'به‌روزرسانی پیکربندی سامانه', JSON.stringify({ keys: Object.keys(patch) }), me.name)
+    const masked = { ...settings }
+    for (const k of SECRET_SETTINGS) if (masked[k]) (masked[k] as string) = MASK
+    return ok({ settings: masked, labels: SETTING_LABELS })
   } catch (e) {
     return errorResponse(e)
   }

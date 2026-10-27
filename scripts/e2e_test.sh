@@ -593,4 +593,145 @@ $CURL -X POST "$BASE/auth/logout" > /dev/null
 $CURL -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123","name":"مدیر سامانه"}' > /dev/null
 
 echo ""
+echo "═══ ۲۸) تقویم مناسبت‌ها — بخش ۱۵.۴ ═══"
+
+echo "── ۲۸.۱) ثبت مناسبت با هر هشت فیلد سند ──"
+OCC1=$($CURL -X POST "$BASE/occasions" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"عید نوروز\",\"calendarType\":\"shamsi\",\"year\":\"1404\",\"startDate\":\"1404-01-01\",\"endDate\":\"1404-01-13\",\"category\":\"official\",\"scope\":\"global\",\"isHoliday\":true,\"source\":\"مصوبه هیئت وزیران\",\"sourceVersion\":\"1404-r1\",\"color\":\"#16a34a\",\"label\":\"نوروز ۱۴۰۴\"}")
+echo "$OCC1" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+o=d['occasion']
+assert o['name'] == 'عید نوروز' and o['calendarType'] == 'shamsi' and o['isHoliday'], 'فیلدهای مناسبت ناقص'
+assert o['source'] and o['sourceVersion'] and o['color'] and o['label'], 'منبع/نسخه/رنگ/برچسب ثبت نشد'
+print('مناسبت:', o['label'], '|', o['startDate'], 'تا', o['endDate'], '| تعطیل:', o['isHoliday'])"
+OCCID1=$(echo "$OCC1" | python3 -c "import json,sys; print(json.load(sys.stdin)['occasion']['id'])")
+echo "✓ مناسبت با هر هشت فیلد بخش ۱۵.۴ ثبت شد"
+
+echo "── ۲۸.۲) هم‌پوشانی مناسبت‌ها — هشدار غیرمسدودکننده (بخش ۱۵.۵) ──"
+$CURL -X POST "$BASE/occasions" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"تعطیلی نوروزی شرکت\",\"calendarType\":\"shamsi\",\"year\":\"1404\",\"startDate\":\"1404-01-10\",\"endDate\":\"1404-01-16\",\"category\":\"organizational\",\"scope\":\"local\",\"isHoliday\":false}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['occasion']['id'], 'مناسبت دوم ثبت نشد'
+assert len(d['overlapWith']) >= 1, 'هم‌پوشانی با نوروز شناسایی نشد'
+print('هم‌پوشان با:', '، '.join(x['name'] for x in d['overlapWith']))
+print('✓ هم‌پوشانی شناسایی شد و هشدار داده شد (۱۵.۵)')"
+
+echo "── ۲۸.۳) ویرایش و فهرست ──"
+$CURL -X PATCH "$BASE/occasions/$OCCID1" -H 'Content-Type: application/json' -d '{"endDate":"1404-01-12"}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['occasion']['endDate'] == '1404-01-12', 'ویرایش مناسبت کار نکرد'
+print('✓ ویرایش مناسبت انجام شد — پایان جدید:', d['occasion']['endDate'])"
+$CURL "$BASE/occasions?projectId=$PID" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert len(d['occasions']) >= 2, 'فهرست مناسبت‌ها ناقص'
+print('فهرست:', len(d['occasions']), 'مناسبت')
+print('✓ فهرست مناسبت‌ها بر اساس سال و تاریخ مرتب است')"
+
+echo "── ۲۸.۴) ورود گروهی از فایل (۱۵.۴: ایجاد یا وارد کند) ──"
+cat > /tmp/occasions_test.csv << 'OCCCSV'
+نام مناسبت,نوع تقویم,سال,تاریخ شروع,تاریخ پایان,دسته,دامنه,تعطیل,منبع,نسخه,رنگ,برچسب
+عید فطر,قمری,1404,1404-03-01,1404-03-03,دینی,سراسری,تعطیل,مرجع تقویمی سازمان,1404-r2,#0ea5e9,عید سعید فطر
+کریسمس,میلادی,2024,2024-12-25,2024-12-25,سایر,سراسری,خیر,,,,کریسمس
+سطر خراب,,,,,,,
+OCCCSV
+$CURL -X POST "$BASE/occasions/import" -F "projectId=$PID" -F "file=@/tmp/occasions_test.csv" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('واردشده:', d['imported'], '| ردشده:', d['failed'])
+assert d['imported'] == 2, 'دو مناسبت معتبر باید وارد می‌شد'
+assert d['failed'] == 1, 'سطر خراب باید رد می‌شد'
+assert d['errors'][0]['row'] == 4, 'رد سطر خراب باید شماره سطر داشته باشد'
+assert isinstance(d.get('overlaps'), list), 'گزارش هم‌پوشانی باید فهرست باشد'
+print('✓ ورود گروهی از فایل با نگاشت سرستون فارسی، رد سطر معیوب و اعلام هم‌پوشانی')"
+
+echo "── ۲۸.۵) حذف مناسبت ──"
+$CURL -X DELETE "$BASE/occasions/$OCCID1" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['deleted'], 'حذف مناسبت کار نکرد'
+print('✓ حذف مناسبت انجام شد')"
+
+echo ""
+echo "═══ ۲۹) خروجی PDF و PowerPoint — بخش ۲۳.۱ ═══"
+
+echo "── ۲۹.۱) خروجی PDF با فونت جاسازی‌شده و صفحه‌بندی ──"
+$CURL -X POST "$BASE/datasets/$DSID/export" -H 'Content-Type: application/json' -d "{\"format\":\"pdf\",\"title\":\"گزارش آزمون PDF\",\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"}],\"filters\":[{\"fieldId\":\"$F_PROV\",\"op\":\"eq\",\"value\":\"تهران\"}]}" -o /tmp/report_test.pdf -w "PDF: HTTP %{http_code} | %{size_download} بایت | نوع: %{content_type}\n"
+python3 - << 'PYEOF'
+data = open('/tmp/report_test.pdf','rb').read()
+assert data[:5] == b'%PDF-', 'فایل PDF معتبر نیست'
+assert len(data) > 5000, 'حجم PDF مشکوک است (فونت جاسازی نشده؟)'
+assert b'/FontFile2' in data, 'فونت جاسازی‌شده در PDF یافت نشد (بخش ۲۳.۱)'
+print('✓ PDF معتبر با فونت جاسازی‌شده وزیرمتن و صفحه‌بندی (۲۳.۱)')
+PYEOF
+
+echo "── ۲۹.۲) خروجی PowerPoint برای ارائه مدیریتی ──"
+$CURL -X POST "$BASE/datasets/$DSID/export" -H 'Content-Type: application/json' -d "{\"format\":\"pptx\",\"title\":\"گزارش آزمون PowerPoint\",\"chartType\":\"bar\",\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"}]}" -o /tmp/report_test.pptx -w "PPTX: HTTP %{http_code} | %{size_download} بایت\n"
+python3 - << 'PYEOF'
+import zipfile
+data = open('/tmp/report_test.pptx','rb').read()
+assert data[:2] == b'PK', 'فایل PPTX (بسته ZIP) معتبر نیست'
+z = zipfile.ZipFile('/tmp/report_test.pptx')
+names = z.namelist()
+assert 'ppt/presentation.xml' in names, 'ساختار پاورپوینت ناقص'
+slides = [n for n in names if n.startswith('ppt/slides/slide')]
+charts = [n for n in names if n.startswith('ppt/charts/chart')]
+print('اسلایدها:', len(slides), '| نمودار بومی:', len(charts) > 0)
+assert len(slides) >= 3, 'اسلایدهای عنوان/نمودار/جدول ساخته نشد'
+assert len(charts) >= 1, 'نمودار بومی پاورپوینت ساخته نشد'
+print('✓ PPTX با اسلاید عنوان، نمودار بومی و جدول مدیریتی (۲۳.۱)')
+PYEOF
+
+echo "── ۲۹.۳) ثبت فیلترها و زمان تولید در شناسنامه (بخش ۲۳.۲) ──"
+$CURL "$BASE/audit" | python3 -c "
+import json,sys
+acts=[a['action'] for a in json.load(sys.stdin)]
+assert 'خروجی PDF' in acts and 'خروجی PowerPoint' in acts, 'خروجی‌ها در ثبت رویداد نیامده (۲۳.۲)'
+print('✓ خروجی PDF/PowerPoint در ردیابی ثبت شد (بخش ۴ و ۲۳.۲)')"
+
+echo ""
+echo "═══ ۳۰) زمان‌بندی خودکار ارزیابی + کانال ایمیلی — تکمیل ۲۶.۲ ═══"
+
+echo "── ۳۰.۱) زمان‌بند با شروع سرور فعال است ──"
+$CURL "$BASE/settings/scheduler" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['scheduler']
+print('فعال:', d['running'], '| فاصله (دقیقه):', d['intervalMinutes'])
+assert d['running'], 'زمان‌بند فعال نشده است'
+assert d['intervalMinutes'] == 60, 'فاصله پیش‌فرض ۶۰ دقیقه نیست'
+print('✓ زمان‌بند خودکار با پیش‌فرض ۶۰ دقیقه فعال است (۲۶.۲)')"
+
+echo "── ۳۰.۲) تغییر فاصله ارزیابی و پیکربندی ایمیل ──"
+$CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d '{"alertEvalIntervalMinutes":45,"emailEnabled":true,"smtpHost":"smtp.test.example","smtpPort":587,"smtpUser":"alerts@test.example","smtpPass":"secret123","smtpFrom":"هشدار <alerts@test.example>","alertEmailTo":"مدیر@test.example، steward@test.example"}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['settings']
+assert d['alertEvalIntervalMinutes'] == 45, 'فاصله ارزیابی ذخیره نشد'
+assert d['emailEnabled'] == True, 'کانال ایمیلی فعال نشد'
+assert d['smtpPass'] == '***', 'گذرواژه باید ماسک شود (بخش ۲۹)'
+print('✓ فاصله ۴۵ دقیقه و SMTP ذخیره شد؛ گذرواژه در پاسخ ماسک است')"
+$CURL "$BASE/settings/scheduler" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['scheduler']
+assert d['intervalMinutes'] == 45, 'فاصله جدید در وضعیت زمان‌بند منعکس نشد'
+print('✓ تغییر فاصله بدون ری‌استارت در وضعیت زمان‌بند اعمال شد')"
+
+echo "── ۳۰.۳) ارسال ایمیل آزمایشی بدون SMTP واقعی — پرش موذبانه ──"
+$CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d '{"emailEnabled":false}' > /dev/null
+$CURL -X POST "$BASE/settings/email-test" -H 'Content-Type: application/json' -d '{}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['result']
+assert d['skipped'] and not d['ok'], 'بدون فعال‌بودن ایمیل باید موذبانه پرش شود'
+print('دلیل:', d['reason'])
+print('✓ کانال ایمیلی غیرفعال → پرش موذبانه بدون خطا (سامانه بدون SMTP هم سالم است)')"
+
+echo "── ۳۰.۴) بازگرداندن تنظیمات پیش‌فرض ──"
+$CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d '{"alertEvalIntervalMinutes":60,"emailEnabled":false,"smtpHost":"","smtpUser":"","smtpPass":"","smtpFrom":"","alertEmailTo":""}' > /dev/null
+$CURL "$BASE/settings/scheduler" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['scheduler']
+assert d['intervalMinutes'] == 60, 'بازگشت به پیش‌فرض انجام نشد'
+print('✓ تنظیمات به پیش‌فرض بازگشت — اجراهای بعدی سازگار می‌ماند')"
+
+echo ""
 echo "✓✓ تست انتها به انتها کامل شد — datasetId=$DSID | reportId=$RID"

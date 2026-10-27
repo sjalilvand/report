@@ -27,7 +27,7 @@ import {
   Loader2, Play, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Table2,
   Save, FileDown, FileText, Grid3X3, X, Plus, Kanban, BookMarked, LayoutDashboard,
   TableProperties, ChevronDown, ZoomIn, RotateCcw, Crosshair, Layers, Link2,
-  Combine, Activity, Flame, Boxes, TrendingUp, Filter, LayoutGrid,
+  Combine, Activity, Flame, Boxes, TrendingUp, Filter, LayoutGrid, Presentation,
 } from 'lucide-react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -420,7 +420,7 @@ export default function ReportBuilder({
     setSelMeasures(ms => [...ms, { fieldId: m?.id, agg: m ? 'sum' : 'count' }])
   }
 
-  const exportReport = async (format: 'xlsx' | 'csv') => {
+  const exportReport = async (format: 'xlsx' | 'csv' | 'pptx' | 'pdf') => {
     if (!dataset) return
     setExporting(true)
     try {
@@ -429,6 +429,8 @@ export default function ReportBuilder({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           format,
+          title: saveTitle.trim() || undefined,
+          chartType: format === 'pptx' ? chartType : undefined,
           dimensions: selDims,
           measures: selMeasures.length > 0 ? selMeasures.map(m => ({ ...m, alias: aliasOf(m) })) : [{ agg: 'count', alias: 'تعداد رکورد' }],
           filters,
@@ -439,10 +441,17 @@ export default function ReportBuilder({
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `گزارش.${format === 'csv' ? 'csv' : 'xlsx'}`
+      const extMap: Record<string, string> = { xlsx: 'xlsx', csv: 'csv', pptx: 'pptx', pdf: 'pdf' }
+      a.download = `گزارش.${extMap[format]}`
       a.click()
       URL.revokeObjectURL(url)
-      toast({ title: 'خروجی آماده شد', description: `فایل ${format.toUpperCase()} با ثبت فیلترها، نسخه داده و زمان تولید (بخش ۲۳.۲ سند).` })
+      const descMap: Record<string, string> = {
+        xlsx: 'فایل اکسل با نوع عدد و تاریخ مناسب و شیت شناسنامه (بخش ۲۳.۱ سند).',
+        csv: 'فایل CSV با کدگذاری UTF-8 و جداکننده (بخش ۲۳.۱ سند).',
+        pptx: 'ارائه مدیریتی PowerPoint با اسلاید عنوان، نمودار بومی و جدول — قابل توسعه در پاورپوینت (بخش ۲۳.۱ سند).',
+        pdf: 'PDF مناسب چاپ با فونت جاسازی‌شده وزیرمتن، فارسی صحیح و صفحه‌بندی (بخش ۲۳.۱ سند).',
+      }
+      toast({ title: 'خروجی آماده شد', description: descMap[format] })
     } catch (e) {
       toast({ title: 'خطا', description: e instanceof Error ? e.message : '', variant: 'destructive' })
     } finally {
@@ -1654,6 +1663,12 @@ export default function ReportBuilder({
               </Button>
               <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => exportReport('csv')} disabled={exporting || !result}>
                 <FileDown className="size-3.5" /> خروجی CSV
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => exportReport('pptx')} disabled={exporting || !result}>
+                <Presentation className="size-3.5" /> خروجی PowerPoint
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => exportReport('pdf')} disabled={exporting || !result}>
+                <FileText className="size-3.5" /> خروجی PDF
               </Button>
               <span className="text-[10px] text-muted-foreground self-center">
                 خروجی فیلترها، نسخه داده و زمان تولید را ثبت می‌کند؛ مجموع خروجی با گزارش منطبق است (بخش ۲۳.۲ سند).

@@ -27,6 +27,7 @@ model Project {
   relations   Relation[]
   alertRules  AlertRule[]
   notifications Notification[]
+  occasions   Occasion[]
 }
 
 // فایل منبع — SourceFile در بخش ۲۸ سند
@@ -267,4 +268,32 @@ model Notification {
   @@index([projectId, read])
   @@index([ruleId])
   @@index([createdAt])
+}
+
+// تقویم مناسبت‌ها — بخش ۱۵.۴ سند
+// جدول مرجع مناسبت‌ها: نام، نوع تقویم، شروع/پایان در هر سال، دسته، سراسری/محلی،
+// تعطیل/غیرتعطیل، منبع و نسخه، رنگ و برچسب نمایشی
+// مناسبت قمری: تاریخ متناظر باید بر اساس مرجع تقویمی مورد تأیید سازمان، سال‌به‌سال ثبت شود
+model Occasion {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name         String
+  calendarType String   @default("shamsi")  // shamsi | ghamari | miladi — نوع تقویم
+  year         String?  // سال ثبت (شمسی، مثلاً ۱۴۰۴) — برای قمری: سال متناظر مرجع تأییدشده
+  startDate    String   // تاریخ شروع YYYY-MM-DD در همان تقویم
+  endDate      String?  // تاریخ پایان (اختیاری — برای دوره‌های چندروزه)
+  category     String   @default("official") // official | religious | organizational | other — دسته مناسبت
+  scope        String   @default("global")   // global | local — سراسری یا محلی
+  isHoliday    Boolean  @default(false)      // تعطیل یا غیرتعطیل
+  source       String?  // منبع اطلاعات
+  sourceVersion String? // نسخه اطلاعات
+  color        String   @default("#2563eb")  // رنگ نمایشی
+  label        String?  // برچسب نمایشی
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([projectId, year])
 }

@@ -21,13 +21,14 @@ import ReportWorkflow, { WorkflowUser } from '@/components/ReportWorkflow'
 import RelationsView from '@/components/RelationsView'
 import DataDictionaryView from '@/components/DataDictionaryView'
 import AlertsView from '@/components/AlertsView'
+import OccasionsView from '@/components/OccasionsView'
 import NotificationBell from '@/components/NotificationBell'
 import AdminView from '@/components/AdminView'
 import LoginView, { AppUser } from '@/components/LoginView'
 import { TransformStep } from '@/lib/types'
 import {
   FolderKanban, Database, Columns3, Gauge, Wand2, Boxes, BarChart3,
-  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked, BellRing,
+  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked, BellRing, CalendarDays,
 } from 'lucide-react'
 
 interface Project { id: string; name: string; description?: string | null; owner?: string | null; domain?: string | null }
@@ -51,7 +52,7 @@ interface DatasetDetail extends Omit<DatasetRow, 'fields' | 'transforms'> {
   transforms: TransformStep[]
 }
 
-type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'relations' | 'dictionary' | 'reports' | 'alerts' | 'admin'
+type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'relations' | 'dictionary' | 'occasions' | 'reports' | 'alerts' | 'admin'
 
 export default function Home() {
   const [project, setProject] = useState<Project | null>(null)
@@ -212,6 +213,7 @@ export default function Home() {
               <TabsTrigger value="model" className="gap-1.5 text-xs" disabled={!detail}><Boxes className="size-3.5" /> مدل و شاخص‌ها</TabsTrigger>
               <TabsTrigger value="relations" className="gap-1.5 text-xs" disabled={datasets.length < 2}><Network className="size-3.5" /> روابط جداول</TabsTrigger>
               <TabsTrigger value="dictionary" className="gap-1.5 text-xs" disabled={!project}><BookMarked className="size-3.5" /> فرهنگ داده</TabsTrigger>
+              <TabsTrigger value="occasions" className="gap-1.5 text-xs" disabled={!project}><CalendarDays className="size-3.5" /> مناسبت‌ها</TabsTrigger>
               <TabsTrigger value="reports" className="gap-1.5 text-xs" disabled={!detail}><BarChart3 className="size-3.5" /> گزارش‌ساز</TabsTrigger>
               <TabsTrigger value="alerts" className="gap-1.5 text-xs" disabled={!project}><BellRing className="size-3.5" /> هشدارها</TabsTrigger>
               <TabsTrigger value="admin" className="gap-1.5 text-xs"><ShieldCheck className="size-3.5" /> مدیریت</TabsTrigger>
@@ -356,6 +358,18 @@ export default function Home() {
               datasets={datasets}
               role={role}
             />
+          </div>
+        )}
+
+        {/* تقویم مناسبت‌ها — بخش ۱۵.۴ سند */}
+        {tab === 'occasions' && project && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<CalendarDays className="size-4" />}
+              title="تقویم مناسبت‌ها"
+              desc="جدول مرجع مناسبت‌ها با نوع تقویم، بازه هر سال، دسته، سراسری/محلی، تعطیل، منبع و نسخه، رنگ و برچسب — ورود دستی یا گروهی از اکسل (بخش ۱۵.۴ سند)"
+            />
+            <OccasionsView projectId={project.id} canEdit={['admin', 'steward', 'analyst'].includes(role)} />
           </div>
         )}
 

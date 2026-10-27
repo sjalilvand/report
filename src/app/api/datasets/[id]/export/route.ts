@@ -1,15 +1,30 @@
 // خروجی گزارش — بخش ۲۳ سند
-// Excel با نوع عدد و تاریخ مناسب، CSV با تعیین کدگذاری
+// Excel با نوع عدد و تاریخ مناسب، CSV با تعیین کدگذاری، PowerPoint برای ارائه مدیریتی،
+// PDF با فونت جاسازی‌شده و صفحه‌بندی (بخش ۲۳.۱)
 // فیلترهای اعمال‌شده، زمان تولید و نسخه داده در خروجی ثبت می‌شود (بخش ۲۳.۲)
 
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { fail, parseJson } from '@/lib/server'
+import { fail, parseJson, logAudit } from '@/lib/server'
 import { runQuery } from '@/lib/query'
 import { requirePerm, errorResponse, applyRowRules, RowRule, maskValue } from '@/lib/auth'
 import { FieldMeta, DataRow, QuerySpec } from '@/lib/types'
 import * as XLSX from 'xlsx'
-import { toPersianDigits, toLatinDigits } from '@/lib/digits'
+import { toPersianDigits } from '@/lib/digits'
+import { buildPptx } from '@/lib/exportppt'
+import { buildPdf } from '@/lib/exportpdf'
+
+
+const OP_LABELS: Record<string, string> = { eq: '=', neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤', contains: 'شامل', notnull: 'خالی نیست', isnull: 'خالی' }
+function filtersTextOf(filters: { fieldId?: string; op?: string; value?: unknown; values?: unknown }[] | undefined, fieldById: Map<string, { label?: string }>): string {
+  const list = filters ?? []
+  if (list.length === 0) return '—'
+  return list.map(f => {
+    const label = fieldById.get(f.fieldId ?? '')?.label ?? f.fieldId
+    const val = Array.isArray(f.values) ? (f.values as unknown[]).map(String).join('، ') : String(f.value ?? '')
+    return `${label} ${OP_LABELS[f.op ?? ''] ?? f.op ?? ''} ${val}`
+  }).join('، ')
+}
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
@@ -85,6 +100,55 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="report_${stamp}.csv"`,
+        },
+      })
+    }
+
+    // ─── PowerPoint — بخش ۲۳.۱ (ارائه مدیریتی) ───
+    if (format === 'pptx') {
+      const faTime = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'full', timeStyle: 'short' }).format(new Date())
+      const filtersText = filtersTextOf(spec.filters as { fieldId?: string; op?: string; value?: unknown; values?: unknown }[] | undefined, fieldById)
+      const buf = await buildPptx({
+        title: body.title ? String(body.title) : `گزارش ${ds.name}`,
+        datasetName: ds.name,
+        dataVersion: ds.version,
+        generatedAt: faTime,
+        filtersText,
+        headers,
+        rows,
+        totalRow,
+        dimCount: spec.dimensions.length,
+        chartType: body.chartType ? String(body.chartType) : undefined,
+      })
+      await logAudit(ds.projectId, 'خروجی PowerPoint', `${ds.name} — ${rows.length} سطر`, user.name)
+      return new Response(new Uint8Array(buf), {
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'Content-Disposition': `attachment; filename="report_${stamp}.pptx"`,
+        },
+      })
+    }
+
+    // ─── PDF — بخش ۲۳.۱ (چاپ، فارسی صحیح، فونت جاسازی‌شده، صفحه‌بندی) ───
+    if (format === 'pdf') {
+      const faTime = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'full', timeStyle: 'short' }).format(new Date())
+      const filtersText = filtersTextOf(spec.filters as { fieldId?: string; op?: string; value?: unknown; values?: unknown }[] | undefined, fieldById)
+      const buf = await buildPdf({
+        title: body.title ? String(body.title) : `گزارش ${ds.name}`,
+        datasetName: ds.name,
+        dataVersion: ds.version,
+        generatedAt: faTime,
+        filtersText,
+        headers,
+        rows,
+        totalRow,
+        dimCount: spec.dimensions.length,
+      })
+      await logAudit(ds.projectId, 'خروجی PDF', `${ds.name} — ${rows.length} سطر`, user.name)
+      return new Response(new Uint8Array(buf), {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="report_${stamp}.pdf"`,
         },
       })
     }

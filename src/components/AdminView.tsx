@@ -18,8 +18,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
 import { formatNumber } from '@/lib/currency'
+import { toPersianDigits } from '@/lib/digits'
 import {
-  Users2, Settings2, ScrollText, Plus, ShieldCheck, ShieldOff, Trash2, KeyRound, Rows3,
+  Users2, Settings2, ScrollText, Plus, ShieldCheck, ShieldOff, Trash2, KeyRound, Rows3, BellRing, Send,
 } from 'lucide-react'
 
 interface UserRow {
@@ -28,6 +29,7 @@ interface UserRow {
 }
 interface RowRuleDTO { datasetId: string; fieldId: string; op: string; value?: string; values?: string[] }
 interface SettingsRow { settings: Record<string, string | number | boolean>; labels: Record<string, string> }
+interface SchedulerStatus { running: boolean; intervalMinutes: number; startedAt: string | null; lastRunAt: string | null; lastRunProjects: number; lastRunEvaluated: number; lastRunCreated: number; lastEmailSent: boolean; lastError: string | null }
 interface AuditRow { id: string; action: string; detail?: string | null; actor?: string | null; createdAt: string; projectId?: string | null }
 interface DatasetLite { id: string; name: string; fields: string }
 
@@ -61,6 +63,8 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
   const [datasets, setDatasets] = useState<DatasetLite[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [rulesUser, setRulesUser] = useState<UserRow | null>(null)
+  const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null)
+  const [testingEmail, setTestingEmail] = useState(false)
 
   // فرم ایجاد کاربر
   const [fName, setFName] = useState('')
@@ -73,6 +77,7 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
   }, [])
   const loadSettings = useCallback(async () => {
     try { setSettings(await api.get<SettingsRow>('/api/settings')) } catch { /* بی‌صدا */ }
+    try { const r = await api.get<{ scheduler: SchedulerStatus }>('/api/settings/scheduler'); setScheduler(r.scheduler) } catch { /* بی‌صدا */ }
   }, [])
   const loadAudit = useCallback(async () => {
     try { setAudit(await api.get<AuditRow[]>('/api/audit')) } catch { /* بی‌صدا */ }
@@ -251,7 +256,7 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
                     <div key={key} className="space-y-1.5">
                       <Label className="text-xs">{label}</Label>
                       <Input
-                        type={typeof val === 'number' ? 'number' : 'text'}
+                        type={key === 'smtpPass' ? 'password' : typeof val === 'number' ? 'number' : 'text'}
                         value={String(val)}
                         onChange={e => {
                           const v = e.target.value
@@ -265,6 +270,55 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
                 })}
               </div>
               <Button size="sm" onClick={saveSettings}>ذخیره پیکربندی</Button>
+
+              {/* زمان‌بند خودکار ارزیابی هشدارها + کانال ایمیلی — تکمیل بخش ۲۶.۲ */}
+              <div className="rounded-lg border p-4 space-y-3 mt-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <p className="text-sm font-medium flex items-center gap-2"><BellRing className="size-4 text-primary" /> زمان‌بند خودکار ارزیابی هشدارها</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">با شروع سرور فعال می‌شود و هر «فاصله ارزیابی» دقیقه همه قواعد فعال را می‌سنجد؛ تغییر فاصله بدون ری‌استارت اعمال می‌شود (بخش ۲۶.۲ سند).</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-1.5 text-xs"
+                    disabled={testingEmail}
+                    onClick={async () => {
+                      setTestingEmail(true)
+                      try {
+                        const res = await api.post<{ result: { ok: boolean; skipped?: boolean; reason?: string; messageId?: string; to?: string[] } }>('/api/settings/email-test', {})
+                        const r = res.result
+                        if (r.ok) toast({ title: 'ایمیل آزمایشی ارسال شد', description: `به: ${r.to?.join('، ')}` })
+                        else toast({ title: 'ارسال انجام نشد', description: r.reason ?? 'پیکربندی SMTP را بررسی کنید.', variant: 'destructive' })
+                      } catch (e) {
+                        toast({ title: 'خطای ارسال', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+                      } finally { setTestingEmail(false); void loadSettings() }
+                    }}
+                  >
+                    <Send className="size-3.5" /> {testingEmail ? 'در حال ارسال...' : 'ارسال ایمیل آزمایشی'}
+                  </Button>
+                </div>
+                {scheduler && (
+                  <div className="flex flex-wrap gap-2 text-[11px]">
+                    <Badge variant={scheduler.running ? 'default' : 'secondary'} className="text-[10px]">
+                      {scheduler.running ? 'فعال' : 'غیرفعال'}
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px]">هر {toPersianDigits(String(scheduler.intervalMinutes))} دقیقه</Badge>
+                    {scheduler.lastRunAt && (
+                      <Badge variant="outline" className="text-[10px]">
+                        آخرین چرخه: {new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(scheduler.lastRunAt))} — {toPersianDigits(String(scheduler.lastRunProjects))} پروژه، {toPersianDigits(String(scheduler.lastRunEvaluated))} قاعده، {toPersianDigits(String(scheduler.lastRunCreated))} اعلان جدید
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-[10px]">
+                      ایمیل: {scheduler.lastEmailSent ? 'ارسال شد' : (settings?.settings.emailEnabled ? 'در انتظار اعلان جدید' : 'غیرفعال')}
+                    </Badge>
+                    {scheduler.lastError && <Badge variant="destructive" className="text-[10px]">خطا: {scheduler.lastError}</Badge>}
+                  </div>
+                )}
+                <p className="text-[11px] text-muted-foreground">
+                  برای کانال ایمیلی: «ارسال ایمیلی هشدارها» را فعال، مشخصات SMTP و گیرندگان (با کاما) را وارد و ذخیره کنید، سپس با «ارسال ایمیل آزمایشی» صحت پیکربندی را بسنجید. خلاصه اعلان‌های جدیدِ هر چرخه به گیرندگان ایمیل می‌شود.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

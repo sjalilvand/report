@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // کتابخانه‌های بومی/سنگین سمت سرور خارج از باندلر — پایداری Turbopack
+  serverExternalPackages: ["pptxgenjs", "@react-pdf/renderer", "nodemailer", "xlsx"],
   /* config options here */
   typescript: {
     ignoreBuildErrors: true,
