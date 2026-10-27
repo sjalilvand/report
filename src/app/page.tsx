@@ -20,12 +20,14 @@ import ReportBuilder from '@/components/ReportBuilder'
 import ReportWorkflow, { WorkflowUser } from '@/components/ReportWorkflow'
 import RelationsView from '@/components/RelationsView'
 import DataDictionaryView from '@/components/DataDictionaryView'
+import AlertsView from '@/components/AlertsView'
+import NotificationBell from '@/components/NotificationBell'
 import AdminView from '@/components/AdminView'
 import LoginView, { AppUser } from '@/components/LoginView'
 import { TransformStep } from '@/lib/types'
 import {
   FolderKanban, Database, Columns3, Gauge, Wand2, Boxes, BarChart3,
-  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked,
+  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked, BellRing,
 } from 'lucide-react'
 
 interface Project { id: string; name: string; description?: string | null; owner?: string | null; domain?: string | null }
@@ -49,7 +51,7 @@ interface DatasetDetail extends Omit<DatasetRow, 'fields' | 'transforms'> {
   transforms: TransformStep[]
 }
 
-type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'relations' | 'dictionary' | 'reports' | 'admin'
+type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'relations' | 'dictionary' | 'reports' | 'alerts' | 'admin'
 
 export default function Home() {
   const [project, setProject] = useState<Project | null>(null)
@@ -190,6 +192,7 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <NotificationBell projectId={project.id} />
               <Badge variant="outline" className="gap-1.5 text-[10px]">
                 <ShieldCheck className="size-3" /> {user.name} — {user.roleLabel ?? user.role}
               </Badge>
@@ -210,6 +213,7 @@ export default function Home() {
               <TabsTrigger value="relations" className="gap-1.5 text-xs" disabled={datasets.length < 2}><Network className="size-3.5" /> روابط جداول</TabsTrigger>
               <TabsTrigger value="dictionary" className="gap-1.5 text-xs" disabled={!project}><BookMarked className="size-3.5" /> فرهنگ داده</TabsTrigger>
               <TabsTrigger value="reports" className="gap-1.5 text-xs" disabled={!detail}><BarChart3 className="size-3.5" /> گزارش‌ساز</TabsTrigger>
+              <TabsTrigger value="alerts" className="gap-1.5 text-xs" disabled={!project}><BellRing className="size-3.5" /> هشدارها</TabsTrigger>
               <TabsTrigger value="admin" className="gap-1.5 text-xs"><ShieldCheck className="size-3.5" /> مدیریت</TabsTrigger>
             </TabsList>
           </Tabs>
@@ -374,6 +378,22 @@ export default function Home() {
               projectId={project.id}
               user={user as WorkflowUser}
               datasets={datasets.map(d => ({ id: d.id, name: d.name }))}
+            />
+          </div>
+        )}
+
+        {tab === 'alerts' && project && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<BellRing className="size-4" />}
+              title="هشدارها و اعلان‌ها"
+              desc="پایش خودکار: عبور شاخص از آستانه، کاهش کیفیت داده، تأخیر در دریافت فایل، شکست پردازش، تغییر ساختار و نبود داده در دوره مورد انتظار (بخش ۲۶.۲ سند)"
+            />
+            <AlertsView
+              projectId={project.id}
+              datasets={datasets.map(d => ({ id: d.id, name: d.name, rowCount: d.rowCount }))}
+              fields={fields.map(f => ({ id: f.id, label: f.label, type: f.type }))}
+              activeDatasetId={activeDatasetId}
             />
           </div>
         )}

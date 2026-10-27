@@ -5,6 +5,7 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { ok, fail, logAudit } from '@/lib/server'
+import { pushSystemNotification } from '@/lib/alerts'
 import { detectWorkbook, fingerprintBuffer } from '@/lib/excel'
 import { requirePerm, errorResponse } from '@/lib/auth'
 import { getSettings } from '@/lib/settings'
@@ -71,7 +72,19 @@ export async function POST(req: NextRequest) {
 
     // بررسی محتوای فایل نه فقط پسوند + مقابله با فایل مخرب — بخش ۲۹ سند
     const inspection = inspectContent(buf, file.name)
-    if (!inspection.ok) return fail(inspection.reason, 415)
+    if (!inspection.ok) {
+      // شکست پردازش → اعلان خودکار — بخش ۲۶.۲ سند
+      await pushSystemNotification({
+        projectId,
+        type: 'processFailure',
+        severity: 'critical',
+        title: 'شکست پردازش فایل',
+        message: `پردازش فایل «${file.name}» ناموفق بود: ${inspection.reason}`,
+        entityType: 'file',
+      }).catch(() => undefined)
+      await logAudit(projectId, 'شکست پردازش', `فایل «${file.name}» پذیرفته نشد: ${inspection.reason}`, user.name).catch(() => undefined)
+      return fail(inspection.reason, 415)
+    }
 
     const fp = fingerprintBuffer(buf)
 
@@ -108,6 +121,22 @@ export async function POST(req: NextRequest) {
       detection,
     }, 201)
   } catch (e) {
+    // شکست پردازش — اعلان خودکار در صورت شناسایی پروژه — بخش ۲۶.۲ سند
+    try {
+      const form = await req.formData().catch(() => null)
+      const pid = form?.get('projectId')
+      if (pid) {
+        await pushSystemNotification({
+          projectId: String(pid),
+          type: 'processFailure',
+          severity: 'critical',
+          title: 'شکست پردازش فایل',
+          message: `خطا در بارگذاری: ${e instanceof Error ? e.message : 'خطای ناشناخته'}`,
+          entityType: 'file',
+        })
+        await logAudit(String(pid), 'شکست پردازش', e instanceof Error ? e.message : 'خطای ناشناخته')
+      }
+    } catch { /* بی‌صدا */ }
     return errorResponse(e)
   }
 }

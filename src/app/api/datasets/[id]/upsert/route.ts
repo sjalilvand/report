@@ -12,6 +12,7 @@ import { extractTable, ExtractConfig, detectWorkbook, fingerprintBuffer } from '
 import { detectColumn } from '@/lib/detect'
 import { rekeyRecords } from '@/lib/server'
 import { requirePerm, errorResponse, can, ROLE_LABELS } from '@/lib/auth'
+import { pushSystemNotification } from '@/lib/alerts'
 import { getSettings } from '@/lib/settings'
 import { FieldMeta, DataRow } from '@/lib/types'
 
@@ -136,6 +137,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     // اثر بر گزارش منتشرشده — ۲۴.۲: توقف به‌روزرسانی انتشارشده و اخذ تأیید مدیر
     const publishedCount = await db.report.count({ where: { datasetId: ds.id, status: 'published' } })
     if (changes.length > 0 && !confirmStructureChange) {
+      // اعلان خودکار تغییر ساختار — بخش ۲۶.۲ سند
+      await pushSystemNotification({
+        projectId: ds.projectId,
+        type: 'structureChange',
+        severity: publishedCount > 0 ? 'critical' : 'warning',
+        title: 'تغییر ساختار مجموعه‌داده',
+        message: publishedCount > 0
+          ? `به‌روزرسانی «${ds.name}» به‌دلیل تغییر ساختار (${changes.map(c => c.detail).join(' ')} متوقف شد؛ تأیید مدیر لازم است — ۲۴.۲.`
+          : `تغییر ساختار در «${ds.name}» شناسایی شد: ${changes.map(c => c.detail).join(' ')}`,
+        entityType: 'dataset',
+        entityId: ds.id,
+      }).catch(() => undefined)
       return ok({
         requiresConfirmation: true,
         structureChanges: changes,

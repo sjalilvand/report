@@ -438,4 +438,158 @@ assert all('ته' in v for v in d['values']), 'جست‌وجو در گزینه�
 print('✓ جست‌وجو در فیلترها فعال است (بخش ۱۹.۳ سند)')"
 
 echo ""
+echo "═══ ۲۷) هشدارها و اعلان‌ها — بخش ۲۶.۲ ═══"
+echo "── ۲۷.۱) قاعده عبور از آستانه: جمع مبلغ بزرگ‌تر از ۱ ریال (قطعاً نقض می‌شود) ──"
+R1=$($CURL -X POST "$BASE/alerts" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"پایش جمع مبلغ\",\"type\":\"threshold\",\"datasetId\":\"$DSID\",\"fieldId\":\"$F_AMT\",\"aggregation\":\"sum\",\"operator\":\"gt\",\"threshold\":1,\"severity\":\"critical\"}")
+RULE1=$(echo "$R1" | python3 -c "import json,sys; print(json.load(sys.stdin)['rule']['id'])")
+echo "$R1" | python3 -c "import json,sys; d=json.load(sys.stdin)['rule']; print('قاعده:', d['name'], '| نوع:', d['type'], '| شدت:', d['severity'])"
+
+echo "── ۲۷.۲) ارزیابی: هشدار فعال و اعلان ساخته می‌شود ──"
+$CURL -X POST "$BASE/alerts/evaluate" -H 'Content-Type: application/json' -d "{\"ruleId\":\"$RULE1\"}" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)['results'][0]
+print('قاعده:', r['ruleName'], '| فعال شد:', r['fired'], '| اعلان جدید:', r['created'], '| مقدار:', r['value'])
+assert r['fired'] and r['created'], 'هشدار آستانه فعال نشد'
+print('✓ عبور شاخص از آستانه → اعلان بحرانی (۲۶.۲)')"
+
+echo "── ۲۷.۳) dedup: ارزیابی دوباره نباید اعلان تکراری بسازد ──"
+$CURL -X POST "$BASE/alerts/evaluate" -H 'Content-Type: application/json' -d "{\"ruleId\":\"$RULE1\"}" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)['results'][0]
+print('فعال شد:', r['fired'], '| اعلان جدید:', r['created'], '| باز قبلی:', r.get('stillOpen'))
+assert r['fired'] and not r['created'] and r.get('stillOpen'), 'جلوگیری از تکرار اعلان کار نمی‌کند'
+print('✓ اعلان بازِ همان قاعده دوباره ساخته نمی‌شود (dedup)')"
+
+echo "── ۲۷.۴) قاعده بدون نقض: جمع مبلغ کوچک‌تر از منفی‌۱ (نباید فعال شود) ──"
+R2=$($CURL -X POST "$BASE/alerts" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"هشدار سقوط فروش\",\"type\":\"threshold\",\"datasetId\":\"$DSID\",\"fieldId\":\"$F_AMT\",\"aggregation\":\"sum\",\"operator\":\"lt\",\"threshold\":-1}")
+RULE2=$(echo "$R2" | python3 -c "import json,sys; print(json.load(sys.stdin)['rule']['id'])")
+$CURL -X POST "$BASE/alerts/evaluate" -H 'Content-Type: application/json' -d "{\"ruleId\":\"$RULE2\"}" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)['results'][0]
+print('فعال شد:', r['fired'], '| مقدار:', r['value'])
+assert not r['fired'], 'قاعده بدون نقض نباید فعال شود'
+print('✓ شرط بدون نقض، بدون اعلان (۲۶.۲)')"
+
+echo "── ۲۷.۵) کاهش کیفیت داده: امتیاز کیفیت زیر ۱۰۰ ──"
+R3=$($CURL -X POST "$BASE/alerts" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"پایش کیفیت داده\",\"type\":\"quality\",\"datasetId\":\"$DSID\",\"threshold\":100,\"severity\":\"warning\"}")
+RULE3=$(echo "$R3" | python3 -c "import json,sys; print(json.load(sys.stdin)['rule']['id'])")
+$CURL -X POST "$BASE/alerts/evaluate" -H 'Content-Type: application/json' -d "{\"ruleId\":\"$RULE3\"}" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)['results'][0]
+print('امتیاز مشاهده‌شده:', r['value'], '| فعال شد:', r['fired'])
+assert r['fired'], 'قاعده کیفیت فعال نشد (امتیاز باید زیر ۱۰۰ باشد)'
+print('✓ کاهش کیفیت داده → اعلان (۲۶.۲)')"
+
+echo "── ۲۷.۶) تأخیر در دریافت فایل: حداکثر ۰ روز (فایل قدیمی‌تر از لحظه فعلی) ──"
+R4=$($CURL -X POST "$BASE/alerts" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"پایش دریافت فایل دوره‌ای\",\"type\":\"fileDelay\",\"datasetId\":\"$DSID\",\"maxDays\":0}")
+RULE4=$(echo "$R4" | python3 -c "import json,sys; print(json.load(sys.stdin)['rule']['id'])")
+$CURL -X POST "$BASE/alerts/evaluate" -H 'Content-Type: application/json' -d "{\"ruleId\":\"$RULE4\"}" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)['results'][0]
+print('عمر فایل (روز):', r['value'], '| فعال شد:', r['fired'])
+assert r['fired'], 'هشدار تأخیر فایل فعال نشد'
+print('✓ تأخیر در دریافت فایل → اعلان (۲۶.۲)')"
+
+echo "── ۲۷.۷) نبود داده در دوره مورد انتظار: کمینه ۹۹۹۹ رکورد ──"
+R5=$($CURL -X POST "$BASE/alerts" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"انتظار داده دوره جدید\",\"type\":\"missingPeriod\",\"datasetId\":\"$DSID\",\"threshold\":9999}")
+RULE5=$(echo "$R5" | python3 -c "import json,sys; print(json.load(sys.stdin)['rule']['id'])")
+$CURL -X POST "$BASE/alerts/evaluate" -H 'Content-Type: application/json' -d "{\"ruleId\":\"$RULE5\"}" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)['results'][0]
+print('رکورد موجود:', r['value'], '| فعال شد:', r['fired'])
+assert r['fired'], 'هشدار نبود داده فعال نشد'
+print('✓ نبود داده در دوره مورد انتظار → اعلان (۲۶.۲)')"
+
+echo "── ۲۷.۸) تغییر ساختار: ارزیابی پایه، تغییر نوع ستون، ارزیابی دوباره ──"
+R6=$($CURL -X POST "$BASE/alerts" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"پایش ساختار ستون‌ها\",\"type\":\"structureChange\",\"datasetId\":\"$DSID\"}")
+RULE6=$(echo "$R6" | python3 -c "import json,sys; print(json.load(sys.stdin)['rule']['id'])")
+$CURL -X POST "$BASE/alerts/evaluate" -H 'Content-Type: application/json' -d "{\"ruleId\":\"$RULE6\"}" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)['results'][0]
+assert not r['fired'], 'ارزیابی اول باید امضای پایه ثبت کند نه هشدار'
+print('ارزیابی اول: امضای پایه ثبت شد (بدون هشدار)')"
+# تغییر نوع ستون تعداد تراکنش: integer ← decimal (تغییر ساختار واقعی)
+$CURL -X PATCH "$BASE/datasets/$DSID/columns" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$F_CNT\",\"type\":\"decimal\"}" > /dev/null
+$CURL -X POST "$BASE/alerts/evaluate" -H 'Content-Type: application/json' -d "{\"ruleId\":\"$RULE6\"}" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)['results'][0]
+print('فعال شد:', r['fired'], '| اعلان جدید:', r['created'])
+assert r['fired'] and r['created'], 'تغییر ساختار شناسایی نشد'
+print('✓ تغییر ساختار (نوع ستون) → اعلان (۲۶.۲)')"
+# بازگرداندن نوع ستون به حالت اول
+$CURL -X PATCH "$BASE/datasets/$DSID/columns" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$F_CNT\",\"type\":\"integer\"}" > /dev/null
+
+echo "── ۲۷.۹) شکست پردازش: بارگذاری فایل نامعتبر → اعلان خودکار ──"
+printf 'این یک فایل متنی ساده است و ساختار اکسل ندارد' > /tmp/fake-report.xlsx
+$CURL -X POST "$BASE/files/upload" -F "file=@/tmp/fake-report.xlsx" -F "projectId=$PID" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('پاسخ: ', d.get('error', 'پذیرفته شد!'))
+assert 'error' in d, 'فایل نامعتبر نباید پذیرفته شود'"
+NOTIF_AFTER=$($CURL "$BASE/notifications?projectId=$PID&unread=1&limit=100")
+echo "$NOTIF_AFTER" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+pf=[n for n in d['items'] if n['type']=='processFailure']
+print('اعلان نخوانده:', d['unreadCount'], '| شکست پردازش:', len(pf))
+assert len(pf) >= 1, 'اعلان خودکار شکست پردازش ساخته نشد'
+assert pf[0]['severity'] == 'critical', 'شدت شکست پردازش باید بحرانی باشد'
+print('✓ شکست پردازش → اعلان خودکار بحرانی (۲۶.۲)')"
+
+echo "── ۲۷.۱۰) ارزیابی کل پروژه: قاعده شکست پردازش رویداد ثبت‌شده را می‌بیند ──"
+R7=$($CURL -X POST "$BASE/alerts" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"پایش شکست پردازش\",\"type\":\"processFailure\"}")
+RULE7=$(echo "$R7" | python3 -c "import json,sys; print(json.load(sys.stdin)['rule']['id'])")
+$CURL -X POST "$BASE/alerts/evaluate" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('خلاصه:', d['summary'])
+assert d['summary']['total'] >= 6, 'همه قواعد ارزیابی نشدند'
+print('✓ ارزیابی گروهی همه قواعد فعال (۲۶.۲)')"
+
+echo "── ۲۷.۱۱) اعلان‌ها: فهرست، خواندن یکی، خواندن همه ──"
+$CURL "$BASE/notifications?projectId=$PID&limit=100" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+types=set(n['type'] for n in d['items'])
+print('اعلان کل:', len(d['items']), '| نخوانده:', d['unreadCount'], '| انواع:', sorted(types))
+need={'threshold','quality','fileDelay','structureChange','missingPeriod','processFailure'}
+assert need.issubset(types), 'همه انواع اعلان تولید نشد: ' + str(need)
+print('✓ هر شش نوع اعلان بخش ۲۶.۲ تولید شد')"
+FIRSTID=$($CURL "$BASE/notifications?projectId=$PID&limit=1" | python3 -c "import json,sys; print(json.load(sys.stdin)['items'][0]['id'])")
+$CURL -X PATCH "$BASE/notifications/$FIRSTID" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['updated'] and d['notification']['read'], 'خواندن تک‌اعلان کار نمی‌کند'
+print('✓ علامت‌گذاری یک اعلان به‌عنوان خوانده‌شده')"
+$CURL -X POST "$BASE/notifications" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"action\":\"read-all\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('خوانده شد:', d['updated'])
+assert d['updated'] >= 1, 'خواندن همه کار نمی‌کند'"
+$CURL "$BASE/notifications?projectId=$PID" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['unreadCount'] == 0, 'همه اعلان‌ها خوانده نشد'
+print('✓ خواندن همه — شمارش نخوانده صفر شد (۲۶.۲)')"
+
+echo "── ۲۷.۱۲) کنترل دسترسی: نقش مشاهده‌کننده نمی‌تواند قاعده بسازد ──"
+$CURL -X POST "$BASE/users" -H 'Content-Type: application/json' -d '{"username":"viewer1","password":"viewer123","name":"مشاهده‌کننده آزمون","role":"viewer"}' > /dev/null || true
+$CURL -X POST "$BASE/auth/logout" > /dev/null
+$CURL -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{"username":"viewer1","password":"viewer123","name":"مشاهده‌کننده آزمون"}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['user']['role'] == 'viewer', 'ورود کاربر مشاهده‌کننده ناموفق بود'
+print('ورود:', d['user']['name'], '| نقش:', d['user']['roleLabel'])"
+DENIED=$($CURL -X POST "$BASE/alerts" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"قاعده غیرمجاز\",\"type\":\"processFailure\"}")
+echo "$DENIED" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('پاسخ:', d.get('error', 'خطا'))
+assert 'error' in d, 'نقش فاقد مجوز باید رد شود'
+print('✓ کنترل دسترسی alert.manage فعال است — مشاهده‌کننده رد شد (۲۹ و ۲۶.۲)')"
+# بازگشت به مدیر برای سازگاری اجراهای بعدی
+$CURL -X POST "$BASE/auth/logout" > /dev/null
+$CURL -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123","name":"مدیر سامانه"}' > /dev/null
+
+echo ""
 echo "✓✓ تست انتها به انتها کامل شد — datasetId=$DSID | reportId=$RID"

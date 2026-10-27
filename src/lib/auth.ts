@@ -40,10 +40,11 @@ export type Permission =
   | 'user.manage'      // مدیریت کاربران
   | 'settings.manage'  // مدیریت پیکربندی ظرفیت
   | 'audit.view'       // مشاهده ثبت رویدادها
+  | 'alert.manage'     // مدیریت قواعد هشدار و ارزیابی — بخش ۲۶.۲
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  admin: ['project.create', 'project.edit', 'file.upload', 'file.delete', 'dataset.create', 'dataset.edit', 'relation.edit', 'report.create', 'report.submit', 'report.approve', 'report.publish', 'report.delete', 'export.run', 'data.view', 'user.manage', 'settings.manage', 'audit.view'],
-  steward: ['file.upload', 'file.delete', 'dataset.create', 'dataset.edit', 'relation.edit', 'report.create', 'report.submit', 'report.approve', 'export.run', 'data.view'],
+  admin: ['project.create', 'project.edit', 'file.upload', 'file.delete', 'dataset.create', 'dataset.edit', 'relation.edit', 'report.create', 'report.submit', 'report.approve', 'report.publish', 'report.delete', 'export.run', 'data.view', 'user.manage', 'settings.manage', 'audit.view', 'alert.manage'],
+  steward: ['file.upload', 'file.delete', 'dataset.create', 'dataset.edit', 'relation.edit', 'report.create', 'report.submit', 'report.approve', 'export.run', 'data.view', 'alert.manage'],
   analyst: ['dataset.create', 'dataset.edit', 'relation.edit', 'report.create', 'report.submit', 'export.run', 'data.view'],
   viewer: ['data.view'],
   auditor: ['data.view', 'audit.view', 'export.run'],
