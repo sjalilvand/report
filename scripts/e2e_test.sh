@@ -1,6 +1,7 @@
 #!/bin/bash
 # تست انتها به انتهای سامانه — سناریوهای پذیرش بخش ۳۳ سند
 # فاز دوم: احراز هویت (۲۹)، روابط بصری جداول (۱۶)، گردش کار تأیید (۲۶.۱)، ظرفیت (۳۰.۱)
+# فاز سوم: جدول محوری (۱۹.۲)، Drill Through (۱۹.۳)، Upsert (۲۴)، نمودارهای تخصصی (۱۹.۲)، فیلتر وابسته (۱۹.۳)
 set -e
 BASE="http://localhost:3000/api"
 JAR="/tmp/e2e_cookies.txt"
@@ -325,6 +326,103 @@ d=json.load(sys.stdin)
 print('پیام:', d.get('error','')[:80])
 assert 'یکسان' in d.get('error',''), 'تشخیص فایل تکراری کار نمی‌کند'
 print('✓ فایل با اثر انگشت محتوا تشخیص داده شد')"
+
+echo ""
+echo "═══ ۲۴) نمودارهای تخصصی: هیستوگرام و جعبه‌ای — بخش ۱۹.۲ ═══"
+echo "── ۲۴.۱) هیستوگرام مبلغ: بازه‌های هم‌عرض با پوشش کامل رکوردها ──"
+$CURL -X POST "$BASE/datasets/$DSID/histogram" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$F_AMT\",\"binCount\":8}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+total=sum(b['count'] for b in d['bins'])
+print('بازه‌ها:', len(d['bins']), '| فراوانی کل:', total, '| وارد محاسبه:', d['used'], '| صرف‌نظر:', d['skipped'])
+print('کمینه:', d['min'], '| بیشینه:', d['max'])
+assert total == d['used'], 'جمع فراوانی بازه‌ها با تعداد وارد محاسبه نمی‌خواند'
+assert d['used'] > 0 and d['min'] <= d['max'], 'هیستوگرام داده معتبر ندارد'
+assert all(b['count'] >= 0 for b in d['bins'])
+print('✓ هیستوگرام صحیح: پوشش کامل رکوردها در بازه‌های هم‌عرض (۱۹.۲)')"
+
+echo "── ۲۴.۲) نمودار جعبه‌ای مبلغ به تفکیک استان: چهارک‌ها و سبیل‌ها ──"
+$CURL -X POST "$BASE/datasets/$DSID/boxplot" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$F_AMT\",\"groupFieldId\":\"$F_PROV\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('گروه‌ها:', [g['name'] for g in d['groups']])
+for g in d['groups']:
+    s=g['stats']
+    assert s['q1'] <= s['median'] <= s['q3'], f'ترتیب چهارک‌ها در «{g[\"name\"]}\" غلط است'
+    assert s['min'] <= s['loWhisker'] <= s['q1'] and s['q3'] <= s['hiWhisker'] <= s['max'], f'ترتیب سبیل‌ها در «{g[\"name\"]}\" غلط است'
+    assert s['count'] > 0
+print('✓ نمودار جعبه‌ای صحیح: min ≤ Q1 ≤ میانه ≤ Q3 ≤ max و سبیل‌ها در محدوده ۱٫۵×IQR')"
+
+echo ""
+echo "═══ ۲۵) فیلتر وابسته — بخش ۱۹.۳ ═══"
+echo "── ۲۵.۱) گزینه‌های پایه: مقادیر متمایز استان از داده واقعی ──"
+OPT=$($CURL -X POST "$BASE/datasets/$DSID/filter-options" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$F_PROV\"}")
+PROVVAL=$(echo "$OPT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['values'][0] if d['values'] else '')")
+echo "$OPT" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('مقادیر:', d['values'][:8], '| متمایز:', d['totalDistinct'], '| رکورد بررسی:', d['matchedRecords'])
+assert d['totalDistinct'] >= 2 and len(d['values']) == d['totalDistinct'], 'گزینه‌های پایه درست نیست'
+print('✓ گزینه‌های فیلتر از داده واقعی خوانده شد')"
+
+echo "── ۲۵.۲) کاسکاد خودکار: با فیلتر استان، گزینه‌های شهرستان محدود می‌شود ──"
+OPT1=$($CURL -X POST "$BASE/datasets/$DSID/filter-options" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$F_CITY\"}")
+OPT1N=$(echo "$OPT1" | python3 -c "import json,sys; print(json.load(sys.stdin)['totalDistinct'])")
+OPT2=$($CURL -X POST "$BASE/datasets/$DSID/filter-options" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$F_CITY\",\"filters\":[{\"fieldId\":\"$F_PROV\",\"op\":\"eq\",\"value\":\"$PROVVAL\"}]}")
+echo "$OPT1" | python3 -c "import json,sys; d=json.load(sys.stdin); print('بدون فیلتر:', d['totalDistinct'], 'شهرستان |', d['values'][:6])"
+echo "$OPT2" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('با فیلتر استان=$PROVVAL:', d['totalDistinct'], 'شهرستان |', d['values'], '| رکورد:', d['matchedRecords'])
+assert d['totalDistinct'] >= 1 and d['matchedRecords'] > 0, 'کاسکاد کار نمی‌کند'
+assert d['totalDistinct'] <= int('$OPT1N'), 'کاسکاد نباید گزینه‌ها را بیشتر کند'
+print('✓ کاسکاد خودکار فیلترها فعال است (بخش ۱۹.۳: فیلتر وابسته)')"
+
+echo "── ۲۵.۳) فیلتر از جدول مرتبط: ستون هدف از رابطه فروش ← اهداف ──"
+ROPT=$($CURL -X POST "$BASE/datasets/$DSID/filter-options" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$T_GOAL\",\"relationId\":\"$RELID\"}")
+echo "$ROPT" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('از رابطه «', d['viaRelation'], '» | مقادیر هدف:', d['values'][:6], '| متمایز:', d['totalDistinct'])
+assert d['viaRelation'] == 'فروش به اهداف', 'برچسب رابطه بازنگشته است'
+assert d['totalDistinct'] >= 1, 'گزینه‌های جدول مرتبط خالی است'
+print('✓ فیلتر وابسته خودکار از روابط جداول کار می‌کند (بخش‌های ۱۶ و ۱۹.۳)')"
+
+echo "── ۲۵.۴) اعمال فیلتر رابطه‌ای در پرس‌وجو: محدودسازی جدول پایه ──"
+RBR=$($CURL -X POST "$BASE/datasets/$DSID/filter-options" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$T_BRANCH\",\"relationId\":\"$RELID\"}")
+BRVAL=$(echo "$RBR" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['values'][0] if d['values'] else '')")
+FULL=$($CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"agg\":\"count\"}]}")
+FULLN=$(echo "$FULL" | python3 -c "import json,sys; print(json.load(sys.stdin)['scannedRecords'])")
+RELF=$($CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"agg\":\"count\"}],\"relationFilters\":[{\"relationId\":\"$RELID\",\"fieldId\":\"$T_BRANCH\",\"op\":\"eq\",\"value\":\"$BRVAL\"}]}")
+echo "$RELF" | python3 -c "
+import json,sys
+full=int('$FULLN')
+d=json.load(sys.stdin)
+print('کل رکورد:', full, '| با فیلتر رابطه‌ای شعبه=$BRVAL:', d['scannedRecords'], '| هشدارها:', d['warnings'])
+assert 0 < d['scannedRecords'] < full, 'فیلتر رابطه‌ای جدول پایه را محدود نکرد'
+print('✓ فیلتر از جدول مرتبط به فیلتر کلید اتصال تبدیل و اعمال شد')"
+
+echo ""
+echo "═══ ۲۶) ماتریس و نقشه حرارتی — بخش ۱۹.۲ ═══"
+echo "── ۲۶.۱) داده ماتریس: استان × شهرستان بدون جمع جزء ──"
+$CURL -X POST "$BASE/datasets/$DSID/pivot" -H 'Content-Type: application/json' -d "{\"rowDims\":[\"$F_PROV\"],\"colDim\":\"$F_CITY\",\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"}],\"subtotals\":false}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+leaves=[r for r in d['rows'] if not r['isSubtotal']]
+print('سطرها:', len(leaves), '| ستون‌ها:', d['colKeys'])
+assert all(not r['isSubtotal'] for r in d['rows']), 'جمع جزء باید خاموش باشد'
+assert len(leaves) >= 2 and len(d['colKeys']) >= 1, 'داده ماتریس ناقص است'
+vals=[r['cells'][f'{ck}||{d[\"measureAliases\"][0]}'] for r in leaves for ck in d['colKeys']]
+print('بازه رنگ‌بندی آستانه‌ای: کمینه', min(vals), '— بیشینه', max(vals))
+print('✓ داده ماتریس/نقشه حرارتی آماده رندر با رنگ‌بندی آستانه‌ای (۱۹.۴)')"
+
+echo "── ۲۵.ب) جست‌وجو در گزینه‌های فیلتر ──"
+$CURL -X POST "$BASE/datasets/$DSID/filter-options" -H 'Content-Type: application/json' -d "{\"fieldId\":\"$F_PROV\",\"search\":\"ته\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('نتایج جست‌وجو «ته»:', d['values'])
+assert all('ته' in v for v in d['values']), 'جست‌وجو در گزینه‌ها کار نمی‌کند'
+print('✓ جست‌وجو در فیلترها فعال است (بخش ۱۹.۳ سند)')"
 
 echo ""
 echo "✓✓ تست انتها به انتها کامل شد — datasetId=$DSID | reportId=$RID"

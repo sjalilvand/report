@@ -7,6 +7,7 @@ import { db } from '@/lib/db'
 import { ok, fail, parseJson } from '@/lib/server'
 import { buildPivot, PivotSpec } from '@/lib/pivot'
 import { requireUser, errorResponse, applyRowRules, maskValue, RowRule } from '@/lib/auth'
+import { resolveRelationFilters, RelationFilter } from '@/lib/relfilter'
 import { FieldMeta, DataRow } from '@/lib/types'
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -34,9 +35,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       subtotals: body.subtotals !== false,
     }
 
+    // فیلتر وابسته از روابط جداول — بخش ۱۹.۳ سند
+    const relationFilters: RelationFilter[] = Array.isArray(body.relationFilters) ? body.relationFilters : []
+    const resolved = await resolveRelationFilters(ds.id, relationFilters, user)
+    if (resolved.filters.length > 0) spec.filters = [...(spec.filters ?? []), ...resolved.filters]
+
     if (spec.rowDims.length === 0) return fail('حداقل یک بُعد سطر برای جدول محوری الزامی است (بخش ۱۹.۲ سند).')
 
     const result = buildPivot(records, fields, spec)
+    if (resolved.warnings.length > 0) result.warnings.push(...resolved.warnings)
 
     // ماسک اطلاعات حساس روی برچسب ابعاد — تجمیع روی داده واقعی حفظ می‌شود (بخش ۲۹ سند)
     const sensitiveIds = fields.filter(f => f.sensitivity === 'confidential').map(f => f.id)

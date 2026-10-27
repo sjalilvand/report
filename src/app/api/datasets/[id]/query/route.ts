@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { ok, fail, parseJson } from '@/lib/server'
 import { runQuery, buildDescriptiveReport } from '@/lib/query'
 import { requireUser, errorResponse, applyRowRules, maskRecords, maskFieldsMeta, RowRule } from '@/lib/auth'
+import { resolveRelationFilters, RelationFilter } from '@/lib/relfilter'
 import { FieldMeta, DataRow, QuerySpec } from '@/lib/types'
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -27,7 +28,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       searchText: body.searchText,
     }
 
+    // فیلتر وابسته از روابط جداول — بخش ۱۹.۳ سند (تبدیل شبه‌اجرا به فیلتر کلید اتصال)
+    const relationFilters: RelationFilter[] = Array.isArray(body.relationFilters) ? body.relationFilters : []
+    const resolved = await resolveRelationFilters(ds.id, relationFilters, user)
+    if (resolved.filters.length > 0) spec.filters = [...(spec.filters ?? []), ...resolved.filters]
+
     const result = runQuery(records, fields, spec)
+    if (resolved.warnings.length > 0) result.warnings.push(...resolved.warnings)
 
     // ماسک اطلاعات حساس فقط روی مقادیر نمایشی (ابعاد) — بخش ۲۹ سند
     // تجمیع روی داده واقعی انجام شده تا صحت محاسبات حفظ شود

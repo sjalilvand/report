@@ -5,7 +5,7 @@ import { DataRow, FieldMeta, QuerySpec, QueryResult, AggregationType, QueryFilte
 import { toLatinDigits } from './digits'
 import { formatAmount, getUnit, isCurrencyUnit } from './currency'
 
-function num(v: unknown): number | null {
+export function num(v: unknown): number | null {
   if (v === null || v === undefined) return null
   // ممیز فارسی/عربی (٫) نیز پشتیبانی می‌شود — بخش ۱۰.۱
   const s = toLatinDigits(String(v)).replace(/[٫,\u060C\s]/g, m => m === '٫' ? '.' : '')
