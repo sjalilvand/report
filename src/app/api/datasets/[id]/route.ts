@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { ok, fail, parseJson } from '@/lib/server'
 import { FieldMeta, TransformStep, DataRow } from '@/lib/types'
-import { requireUser, errorResponse, applyRowRules, maskRecords, maskFieldsMeta, RowRule } from '@/lib/auth'
+import { requireUser, requirePerm, errorResponse, applyRowRules, maskRecords, maskFieldsMeta, RowRule } from '@/lib/auth'
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {

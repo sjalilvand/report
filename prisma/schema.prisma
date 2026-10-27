@@ -75,23 +75,34 @@ model Dataset {
   @@index([projectId])
 }
 
-// فیلد مشتق‌شده / سنجه محاسباتی — بخش ۱۲ و ۱۸ (فرهنگ داده)
+// فرهنگ داده — شاخص مرکزی قابل استفاده مجدد — بخش ۱۸ سند
+// هر شاخص: نام و کد، تعریف مدیریتی، فرمول، جدول و ستون منبع، واحد، نوع تجمیع،
+// فیلترهای ثابت، دامنه کاربرد، مالک، نسخه، تاریخ تأیید و محدودیت‌ها
 model MeasureDefinition {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   projectId    String
-  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name         String // کد/نام شاخص
   label        String
-  description  String? // تعریف مدیریتی
-  formula      String // فرمول
+  description  String? // تعریف مدیریتی (مثال سند: «تعداد افراد» یعنی تعداد رکورد یا شناسه متمایز؟)
+  formula      String    @default("") // فرمول (در صورت محاسباتی بودن)
+  datasetId    String? // جدول و ستون منبع
+  sourceFieldId String? // ستون منبع
   unit         String?
-  aggregation  String   @default("sum") // نوع تجمیع — بخش ۱۱.۴
-  datasetId    String? // جدول منبع
-  owner        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  aggregation  String    @default("sum") // نوع تجمیع — بخش ۱۱.۴
+  fixedFilters String    @default("[]") // JSON: فیلترهای ثابت شاخص — بخش ۱۸
+  scope        String? // دامنه کاربرد
+  owner        String? // مالک شاخص
+  limitations  String? // محدودیت‌ها
+  status       String    @default("draft") // draft | approved — شاخص تأییدشده در گزارش‌ها قابل استفاده مجدد است
+  version      Int       @default(1)
+  approvedAt   DateTime? // تاریخ تأیید
+  approvedBy   String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([projectId])
+  @@index([status])
 }
 
 // گزارش — Report و ReportVersion و ReportComponent در بخش ۲۸

@@ -221,4 +221,30 @@ print('وضعیت:', c.get('status'), '| کارتی تشخیص‌شده:', (r or
 print('هشدارها:', [w[:80] for w in c.get('warnings', [])])"
 
 echo ""
+echo "═══ ۲۰) فرهنگ داده و شاخص‌ها — بخش ۱۸ ═══"
+echo "── ۲۰.۱) ثبت شاخص «تعداد» بدون تعریف مدیریتی (باید رد شود — مثال سند) ──"
+$CURL -X POST "$BASE/measures" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"CNT_PERSONS\",\"label\":\"تعداد افراد\",\"aggregation\":\"count\"}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error', 'خطا: ثبت شد!'))"
+
+echo "── ۲۰.۲) ثبت شاخص صحیح با تعریف مدیریتی ──"
+M=$($CURL -X POST "$BASE/measures" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"name\":\"SALES_SUM\",\"label\":\"جمع مبلغ فروش\",\"description\":\"جمع ستون مبلغ تراکنش‌ها به مبنای ریال؛ مرجوعی‌ها منفی لحاظ می‌شوند\",\"datasetId\":\"$DSID\",\"sourceFieldId\":\"$F_AMT\",\"aggregation\":\"sum\",\"unit\":\"ریال\",\"scope\":\"گزارش‌های فروش\",\"limitations\":\"شامل مالیات نیست\"}")
+MID=$(echo "$M" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id',''))")
+echo "$M" | python3 -c "import json,sys; d=json.load(sys.stdin); print('شاخص:', d.get('label'), '| وضعیت:', d.get('status'), '| مالک:', d.get('owner'))"
+
+echo "── ۲۰.۳) تلاش برای استفاده پیش از تأیید (فهرست تأییدشده خالی است) ──"
+$CURL "$BASE/measures?projectId=$PID&status=approved" | python3 -c "import json,sys; d=json.load(sys.stdin); print('شاخص‌های تأییدشده:', len(d))"
+
+echo "── ۲۰.۴) تأیید شاخص توسط مدیر ──"
+$CURL -X PATCH "$BASE/measures/$MID" -H 'Content-Type: application/json' -d '{"action":"approve"}' | python3 -c "import json,sys; d=json.load(sys.stdin); print('وضعیت:', d.get('status'), '| تأییدکننده:', d.get('approvedBy'))"
+
+echo "── ۲۰.۵) ویرایش شاخص تأییدشده → بازگشت به پیش‌نویس و افزایش نسخه ──"
+$CURL -X PATCH "$BASE/measures/$MID" -H 'Content-Type: application/json' -d '{"unit":"میلیون ریال"}' | python3 -c "import json,sys; d=json.load(sys.stdin); print('وضعیت:', d.get('status'), '| نسخه:', d.get('version'))"
+$CURL -X PATCH "$BASE/measures/$MID" -H 'Content-Type: application/json' -d '{"action":"approve"}' > /dev/null
+
+echo "── ۲۰.۶) شاخص تأییدشده آماده استفاده در گزارش‌ساز ──"
+$CURL "$BASE/measures?projectId=$PID&status=approved" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for m in d: print(f\"  • {m['label']} ({m['name']}) | تجمیع: {m['aggregation']} | جدول: {'دارد' if m['datasetId'] else '—'}\")"
+
+echo ""
 echo "✓✓ تست انتها به انتها کامل شد — datasetId=$DSID | reportId=$RID"

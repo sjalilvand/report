@@ -1,7 +1,7 @@
 // موتور محاسبات و پرس‌وجو — بخش ۱۱، ۱۳ و ۲۰ سند
 // تفکیک ابعاد و سنجه‌ها، انواع تجمیع، واحدها و تولید گزارش توصیفی
 
-import { DataRow, FieldMeta, QuerySpec, QueryResult, AggregationType } from './types'
+import { DataRow, FieldMeta, QuerySpec, QueryResult, AggregationType, QueryFilter } from './types'
 import { toLatinDigits } from './digits'
 import { formatAmount, getUnit, isCurrencyUnit } from './currency'
 
@@ -113,7 +113,7 @@ export function runQuery(records: DataRow[], fields: FieldMeta[], spec: QuerySpe
   return { rows: limited, totals, rowCount: limited.length, scannedRecords: scanned, warnings }
 }
 
-function matchFilter(v: unknown, flt: QuerySpec['filters'][number]): boolean {
+function matchFilter(v: unknown, flt: QueryFilter): boolean {
   const s = v === null || v === undefined ? '' : String(v).trim()
   switch (flt.op) {
     case 'eq': return s === String(flt.value)

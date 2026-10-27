@@ -107,4 +107,4 @@ function dayOfYearJalali(jy: number, jm: number, jd: number): number {
   return n
 }
 
-export { FA_MONTHS, JALALI_SEASONS, JALALI_SEASON_MONTHS, WEEKDAYS_FA }
+export { FA_MONTHS, JALALI_SEASON_MONTHS, WEEKDAYS_FA }

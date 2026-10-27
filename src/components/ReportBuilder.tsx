@@ -3,8 +3,9 @@
 // طراح گزارش و داشبورد — بخش ۱۹ سند
 // جدول، نمودار میله‌ای/خطی/دایره‌ای، کارت شاخص، فیلتر، گزارش توصیفی، انتشار و خروجی
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { api } from '@/lib/client'
+import type { MeasureDTO } from './DataDictionaryView'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,7 +21,7 @@ import { formatNumber, formatAmount, autoDisplayUnit, getUnit, fromBaseRial } fr
 import { toPersianDigits } from '@/lib/digits'
 import {
   Loader2, Play, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Table2,
-  Save, FileDown, FileText, Grid3X3, X, Plus, Kanban,
+  Save, FileDown, FileText, Grid3X3, X, Plus, Kanban, BookMarked,
 } from 'lucide-react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -68,7 +69,17 @@ export default function ReportBuilder({
   const [descriptive, setDescriptive] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [saveTitle, setSaveTitle] = useState('')
+  const [approvedMeasures, setApprovedMeasures] = useState<MeasureDTO[]>([])
   const { toast } = useToast()
+
+  // شاخص‌های تأییدشده فرهنگ داده — بخش ۱۸: قابل استفاده مجدد در گزارش‌های مختلف
+  useEffect(() => {
+    let alive = true
+    api.get<MeasureDTO[]>(`/api/measures?projectId=${encodeURIComponent(projectId)}&status=approved`)
+      .then(ms => { if (alive) setApprovedMeasures(ms) })
+      .catch(() => undefined)
+    return () => { alive = false }
+  }, [projectId])
 
   const fieldLabel = (id?: string) => fields.find(f => f.id === id)?.label ?? id ?? ''
 
@@ -291,6 +302,31 @@ export default function ReportBuilder({
               </div>
             ))}
             {selMeasures.length === 0 && <p className="text-xs text-muted-foreground">سنجه‌ای انتخاب نشده؛ «تعداد رکورد» محاسبه می‌شود.</p>}
+
+            {approvedMeasures.length > 0 && (
+              <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-2 space-y-1.5">
+                <div className="flex items-center gap-1 text-[11px] font-medium text-teal-800">
+                  <BookMarked className="size-3" /> شاخص‌های تأییدشده فرهنگ داده (بخش ۱۸ سند)
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {approvedMeasures.map(m => {
+                    const usable = m.datasetId === dataset?.id && !!m.sourceFieldId && fields.some(f => f.id === m.sourceFieldId)
+                    return (
+                      <button key={m.id} disabled={!usable}
+                        title={usable ? m.description ?? m.label : 'جدول منبع این شاخص با مجموعه‌داده فعلی یکسان نیست'}
+                        className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${usable ? 'border-teal-300 bg-white text-teal-800 hover:bg-teal-100 cursor-pointer' : 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'}`}
+                        onClick={() => {
+                          if (!usable) return
+                          setSelMeasures(ms => [...ms, { fieldId: m.sourceFieldId ?? undefined, agg: m.aggregation, displayUnit: m.unit ?? undefined }])
+                          toast({ title: `شاخص «${m.label}» افزوده شد`, description: 'تعریف یکسان فرهنگ داده در این گزارش به کار رفت.' })
+                        }}>
+                        {m.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 

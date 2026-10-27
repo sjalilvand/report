@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     if (!file) return fail('فایل یافت نشد.', 404)
 
     const buf = Buffer.from(file.content, 'base64')
-    const sheetInfo = parseJson<{ dataStartRow: number; dataEndRow: number; headerCandidate: number }[]>(file.sheetInfo, [])
+    const sheetInfo = parseJson<{ name?: string; dataStartRow: number; dataEndRow: number; headerCandidate: number }[]>(file.sheetInfo, [])
     const info = sheetInfo.find(s => s.name === sheetName)
 
     const cfg: ExtractConfig = {

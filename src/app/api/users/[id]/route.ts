@@ -3,7 +3,7 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { ok, fail, logAudit } from '@/lib/server'
-import { requirePerm, errorResponse, hashPassword, parseRowRules, ROLE_LABELS, Role } from '@/lib/auth'
+import { requirePerm, errorResponse, hashPassword, parseRowRules, ROLE_LABELS, Role, RowRule } from '@/lib/auth'
 
 const VALID_ROLES: Role[] = ['admin', 'steward', 'analyst', 'viewer', 'auditor']
 

@@ -234,7 +234,7 @@ export function applyTransform(
           if (method === 'ffill') return { ...r, [col]: last }
           return { ...r, [col]: val }
         }
-        if (method === 'ffill') last = v
+        if (method === 'ffill') last = String(v)
         return r
       })
       warnings.push(`${filled} مقدار خالی پر شد (بخش ۱۰.۲ سند).`)

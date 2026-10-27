@@ -18,11 +18,13 @@ import ModelView from '@/components/ModelView'
 import ReportBuilder from '@/components/ReportBuilder'
 import ReportWorkflow, { WorkflowUser } from '@/components/ReportWorkflow'
 import RelationsView from '@/components/RelationsView'
+import DataDictionaryView from '@/components/DataDictionaryView'
 import AdminView from '@/components/AdminView'
 import LoginView, { AppUser } from '@/components/LoginView'
+import { TransformStep } from '@/lib/types'
 import {
   FolderKanban, Database, Columns3, Gauge, Wand2, Boxes, BarChart3,
-  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut,
+  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked,
 } from 'lucide-react'
 
 interface Project { id: string; name: string; description?: string | null; owner?: string | null; domain?: string | null }
@@ -43,10 +45,10 @@ interface DatasetDetail extends Omit<DatasetRow, 'fields' | 'transforms'> {
   file: { id: string; name: string; size: number; fingerprint: string }
   sample: Record<string, unknown>[]
   fields: FieldMetaClient[] // API جزئیات، فیلدها را پارس‌شده برمی‌گرداند
-  transforms: unknown[]
+  transforms: TransformStep[]
 }
 
-type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'relations' | 'reports' | 'admin'
+type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'relations' | 'dictionary' | 'reports' | 'admin'
 
 export default function Home() {
   const [project, setProject] = useState<Project | null>(null)
@@ -121,7 +123,7 @@ export default function Home() {
   }, [activeDatasetId])
 
   const fields: FieldMetaClient[] = detail?.fields ?? []
-  const transforms: unknown[] = detail?.transforms ?? []
+  const transforms: TransformStep[] = detail?.transforms ?? []
 
   const selectProject = (p: Project) => {
     setProject(p)
@@ -205,6 +207,7 @@ export default function Home() {
               <TabsTrigger value="cleaning" className="gap-1.5 text-xs" disabled={!detail}><Wand2 className="size-3.5" /> پاک‌سازی</TabsTrigger>
               <TabsTrigger value="model" className="gap-1.5 text-xs" disabled={!detail}><Boxes className="size-3.5" /> مدل و شاخص‌ها</TabsTrigger>
               <TabsTrigger value="relations" className="gap-1.5 text-xs" disabled={datasets.length < 2}><Network className="size-3.5" /> روابط جداول</TabsTrigger>
+              <TabsTrigger value="dictionary" className="gap-1.5 text-xs" disabled={!project}><BookMarked className="size-3.5" /> فرهنگ داده</TabsTrigger>
               <TabsTrigger value="reports" className="gap-1.5 text-xs" disabled={!detail}><BarChart3 className="size-3.5" /> گزارش‌ساز</TabsTrigger>
               <TabsTrigger value="admin" className="gap-1.5 text-xs"><ShieldCheck className="size-3.5" /> مدیریت</TabsTrigger>
             </TabsList>
@@ -310,7 +313,7 @@ export default function Home() {
             <ModelView
               datasetId={detail.id}
               fields={fields}
-              grain={detail.grain}
+              grain={detail.grain ?? null}
               records={detail.sample}
               onChange={() => { refreshDetail(); refreshDatasets() }}
             />
@@ -328,6 +331,21 @@ export default function Home() {
               projectId={project.id}
               datasets={datasets}
               canEdit={canEditRelation}
+            />
+          </div>
+        )}
+
+        {tab === 'dictionary' && project && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<BookMarked className="size-4" />}
+              title="فرهنگ داده و شاخص‌های سازمانی"
+              desc="تعریف یکتای شاخص‌ها با فرمول، منبع، واحد و مالک؛ شاخص تأییدشده در همه گزارش‌ها به‌صورت یکسان به کار می‌رود (بخش ۱۸ سند)"
+            />
+            <DataDictionaryView
+              projectId={project.id}
+              datasets={datasets}
+              role={role}
             />
           </div>
         )}
