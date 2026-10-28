@@ -10,6 +10,8 @@ import { maskRecords, maskFieldsMeta } from '@/lib/auth'
 import { buildAutoDashboard, applyLayout, AutoDashLayout } from '@/lib/autodash'
 import { runQuery, measureAlias } from '@/lib/query'
 import { buildSmartReportInner, SMART_REPORT_CSS } from '@/lib/smart-report'
+import { buildDeepAnalysis } from '@/lib/deep-analysis'
+import { buildDeepReportInner, DEEP_REPORT_CSS } from '@/lib/deep-report'
 import { toPersianDigits } from '@/lib/digits'
 
 export const dynamic = 'force-dynamic'
@@ -29,10 +31,10 @@ const faGroup = (n: unknown): string => {
 
 const PALETTE = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, css }: { children: React.ReactNode; css?: string }) {
   return (
     <div style={{ minHeight: '100vh', background: '#f1f5f9', padding: '18px' }}>
-      <style dangerouslySetInnerHTML={{ __html: SMART_REPORT_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: css ?? SMART_REPORT_CSS }} />
       {children}
     </div>
   )
@@ -153,6 +155,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   const metaFa = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'full', timeStyle: 'short' }).format(report.publishedAt ?? new Date())
 
   let inner = ''
+  let shareCss: string | undefined
   if (cfg.kind === 'autodash') {
     const dash = buildAutoDashboard(ds.name, masked, visibleFields)
     // چیدمان در config گزارش به‌صورت آبجکت ذخیره شده (و در نسخه‌های قدیمی رشته JSON)
@@ -160,17 +163,43 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     const layout: AutoDashLayout = typeof layoutRaw === 'string'
       ? parseJson<AutoDashLayout>(layoutRaw, {})
       : layoutRaw && typeof layoutRaw === 'object' ? (layoutRaw as AutoDashLayout) : {}
-    const applied = applyLayout(dash, layout)
-    inner = buildSmartReportInner(applied, {
-      title: report.title,
-      subtitle: report.description ?? undefined,
-      datasetName: ds.name,
-      rowCount: masked.length,
-      columnCount: visibleFields.length,
-      dataVersion: ds.version,
-      generatedAtFa: `${metaFa} | انتشار عمومی`,
-      confidentialHidden: fields.length - visibleFields.length,
-    })
+    // تحلیل عمیق فایل منبع — فقط وقتی ستون محرمانه برای مشاهده‌کننده وجود ندارد (بخش ۲۹ سند)
+    const hasConfidential = fields.some(f => f.sensitivity === 'confidential')
+    const fileBuf = !hasConfidential && ds.fileId
+      ? await db.sourceFile.findUnique({ where: { id: ds.fileId }, select: { name: true, content: true } })
+      : null
+    let deep: ReturnType<typeof buildDeepAnalysis> | null = null
+    if (fileBuf?.content) {
+      try {
+        deep = buildDeepAnalysis(ds.name, [{ name: fileBuf.name, buffer: Buffer.from(fileBuf.content, 'base64') }])
+      } catch {
+        deep = null
+      }
+    }
+    if (deep?.ok) {
+      shareCss = DEEP_REPORT_CSS
+      inner = buildDeepReportInner(deep, {
+        title: report.title,
+        datasetName: ds.name,
+        rowCount: masked.length,
+        columnCount: visibleFields.length,
+        dataVersion: ds.version,
+        generatedAtFa: `${metaFa} | انتشار عمومی`,
+        confidentialHidden: fields.length - visibleFields.length,
+      })
+    } else {
+      const applied = applyLayout(dash, layout)
+      inner = buildSmartReportInner(applied, {
+        title: report.title,
+        subtitle: report.description ?? undefined,
+        datasetName: ds.name,
+        rowCount: masked.length,
+        columnCount: visibleFields.length,
+        dataVersion: ds.version,
+        generatedAtFa: `${metaFa} | انتشار عمومی`,
+        confidentialHidden: fields.length - visibleFields.length,
+      })
+    }
     // پانوشت اختصاصی اشتراک عمومی
     inner += `<div class="foot">🔒 این صفحه از طریق لینک عمومی گزارش منتشرشده در دسترس است؛ لغو انتشار، لینک را بلافاصله غیرفعال می‌کند.</div>`
   } else {
@@ -185,7 +214,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   }
 
   return (
-    <Shell>
+    <Shell css={shareCss}>
       <div dangerouslySetInnerHTML={{ __html: inner }} />
     </Shell>
   )

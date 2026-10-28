@@ -8,12 +8,13 @@ import { ok, fail, parseJson } from '@/lib/server'
 import { FieldMeta, DataRow } from '@/lib/types'
 import { requireUser, requirePerm, errorResponse, applyRowRules, maskRecords, maskFieldsMeta, RowRule } from '@/lib/auth'
 import { buildAutoDashboard, applyLayout, sanitizeLayout, AutoDashLayout } from '@/lib/autodash'
+import { buildDeepAnalysis, DeepAnalysis } from '@/lib/deep-analysis'
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireUser(req)
     const { id } = await ctx.params
-    const ds = await db.dataset.findUnique({ where: { id } })
+    const ds = await db.dataset.findUnique({ where: { id }, include: { file: true } })
     if (!ds) return fail('مجموعه‌داده یافت نشد.', 404)
 
     const fields = parseJson<FieldMeta[]>(ds.fields, [])
@@ -27,10 +28,23 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const config = parseJson<Record<string, unknown>>(ds.config, {})
     const layout = parseJson<AutoDashLayout | null>((config.autoDashLayout as string) ?? null, null)
 
+    // تحلیل عمیق از فایل منبع — فقط وقتی ستون محرمانه‌ای برای این نقش ماسک نمی‌شود،
+    // چون تجمیع‌های تحلیل عمیق از فایل خام محاسبه می‌شوند (بخش ۲۹ سند)
+    let deep: DeepAnalysis | null = null
+    const maskedForRole = user.role !== 'admin' && fields.some(f => f.sensitivity === 'confidential')
+    if (!maskedForRole && ds.file?.content) {
+      try {
+        deep = buildDeepAnalysis(ds.name, [{ name: ds.file.name, buffer: Buffer.from(ds.file.content, 'base64') }])
+      } catch {
+        deep = null
+      }
+    }
+
     return ok({
       dashboard: applyLayout(dash, layout),
       raw: dash, // نسخه بدون چیدمان برای بازگردانی پیش‌فرض در ویرایشگر
       layout,
+      deep,
       dataVersion: ds.version,
       columnCount: visibleFields.length,
       effectiveFields: visibleFields.filter(f => visibleIds.has(f.id)).length,

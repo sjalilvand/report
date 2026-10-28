@@ -51,6 +51,10 @@ const faPct = (v: number): string => `${faNum((Math.round(v * 1000) / 10).toLoca
 
 const fmtDateCell = (s: string): string => (s ? faNum(s) : '—')
 
+// درصد از مقدار «آماده» (۰–۱۰۰) — برخلاف faPct که کسر ۰–۱ می‌گیرد؛
+// این تفکیک باگ دوبرابرشدن درصد (۷۵٫۷٪ → ۷٬۵۷۳٪) در تفکیک‌ها را رفع می‌کند
+const faPctReady = (v: number): string => `${faNum((Math.round(v * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 }).replace(/,/g, '٬'))}٪`
+
 // ─────────────────────────── استایل درونی (خودبسنده) ───────────────────────────
 
 const CSS = `
@@ -196,7 +200,7 @@ export function buildSmartReportInner(dash: AutoDash, meta: SmartReportMeta): st
           <span class="nm" title="${esc(r.label)}">${esc(r.label)}</span>
           <div class="track"><div class="fill" style="width:${Math.max(1.5, Math.round((Math.abs(r.value) / max) * 100))}%"></div></div>
           <span class="vl">${faCompact(r.value)}</span>
-          <span class="pc">${faPct(r.share)}</span>
+          <span class="pc">${faPctReady(r.share)}</span>
         </div>`).join('')
       // دونات سهم — ۶ ردیف برتر + سایر
       const top6 = bd.rows.slice(0, 6)
@@ -210,10 +214,10 @@ export function buildSmartReportInner(dash: AutoDash, meta: SmartReportMeta): st
         segs.push(`${PALETTE[i % PALETTE.length]} ${from.toFixed(1)}deg ${to.toFixed(1)}deg`)
       })
       if (othersShare > 0.5) segs.push(`#94a3b8 ${acc * 3.6}deg 360deg`)
-      const legend = top6.map((r, i) => `<div class="li"><span class="dot" style="background:${PALETTE[i % PALETTE.length]}"></span><span class="nm" title="${esc(r.label)}">${esc(r.label)}</span><span class="vv">${faPct(r.share)}</span></div>`).join('')
+      const legend = top6.map((r, i) => `<div class="li"><span class="dot" style="background:${PALETTE[i % PALETTE.length]}"></span><span class="nm" title="${esc(r.label)}">${esc(r.label)}</span><span class="vv">${faPctReady(r.share)}</span></div>`).join('')
         + (othersShare > 0.5 ? `<div class="li"><span class="dot" style="background:#94a3b8"></span><span class="nm">سایر (${faNum(bd.rows.length - 6)} مورد)</span><span class="vv">${faPct(othersShare / 100)}</span></div>` : '')
-      const tableRows = bd.rows.map(r => `<tr><td>${esc(r.label)}</td><td class="num">${faNum(faGroup(r.count))}</td><td class="num">${faGroup(r.value)}</td><td class="num">${faGroup(r.count ? r.value / r.count : 0)}</td><td class="num" style="color:#059669">${faPct(r.share)}</td></tr>`).join('')
-      const othersRow = bd.othersValue || bd.othersCount ? `<tr style="background:#f8fafc"><td>سایر (${faNum(bd.othersCount)} مورد)</td><td class="num">${faNum(faGroup(bd.othersCount))}</td><td class="num">${faGroup(bd.othersValue)}</td><td class="num">${faGroup(bd.othersCount ? bd.othersValue / bd.othersCount : 0)}</td><td class="num" style="color:#64748b">${faPct(bd.total ? bd.othersValue / bd.total : 0)}</td></tr>` : ''
+      const tableRows = bd.rows.map(r => `<tr><td>${esc(r.label)}</td><td class="num">${faNum(faGroup(r.count))}</td><td class="num">${faGroup(r.value)}</td><td class="num">${faGroup(r.count ? r.value / r.count : 0)}</td><td class="num" style="color:#059669">${faPctReady(r.share)}</td></tr>`).join('')
+      const othersRow = bd.othersValue || bd.othersCount ? `<tr style="background:#f8fafc"><td>سایر (${faNum(bd.othersCount)} مورد)</td><td class="num">${faNum(faGroup(bd.othersCount))}</td><td class="num">${faGroup(bd.othersValue)}</td><td class="num">${faGroup(bd.othersCount ? bd.othersValue / bd.othersCount : 0)}</td><td class="num" style="color:#64748b">${faPctReady(bd.total ? bd.othersValue / bd.total * 100 : 0)}</td></tr>` : ''
       parts.push(`<div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px;background:#fbfdff">
         <div style="font-weight:800;font-size:12.5px;color:#0f172a;margin-bottom:10px">${esc(bd.dimensionLabel)} <span style="font-weight:400;color:#64748b;font-size:10.5px">| سنجه: ${esc(bd.measureLabel)}</span></div>
         <div class="donut-row">

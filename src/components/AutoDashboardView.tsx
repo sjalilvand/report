@@ -9,6 +9,7 @@ import { api } from '@/lib/client'
 import { formatNumber } from '@/lib/currency'
 import type { AutoDash, AutoDashLayout, AutoDashKpi, AutoDashBreakdown } from '@/lib/autodash'
 import type { SmartAnalysis } from '@/lib/smarttemplates'
+import type { DeepAnalysis } from '@/lib/deep-analysis'
 import SmartTemplatePanel from '@/components/SmartTemplatePanel'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -283,6 +284,7 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
   const [saveSubmit, setSaveSubmit] = useState(false)
   const [savePublish, setSavePublish] = useState(false)
   const [savingReport, setSavingReport] = useState(false)
+  const [deep, setDeep] = useState<DeepAnalysis | null>(null)
   const [savedInfo, setSavedInfo] = useState<{ id: string; title: string; status: string; version: number; created: boolean } | null>(null)
   const [sharePath, setSharePath] = useState<string | null>(null)
   const [shareLoading, setShareLoading] = useState(false)
@@ -291,8 +293,9 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
     setLoading(true)
     setError('')
     try {
-      const res = await api.get<{ dashboard: AutoDash; raw: AutoDash; layout: AutoDashLayout | null; dataVersion?: number; columnCount?: number }>(`/api/datasets/${datasetId}/autodash`)
+      const res = await api.get<{ dashboard: AutoDash; raw: AutoDash; layout: AutoDashLayout | null; deep?: DeepAnalysis | null; dataVersion?: number; columnCount?: number }>(`/api/datasets/${datasetId}/autodash`)
       setRaw(res.raw ?? res.dashboard)
+      setDeep(res.deep ?? null)
       const l = res.layout ?? {}
       setLayout(l)
       setSavedLayout(l)
@@ -784,6 +787,7 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
         <TabsContent value="report" className="space-y-4">
           <SmartReportView
             dash={dash}
+            deep={deep}
             datasetName={datasetName}
             dataVersion={dataVersion}
             columnCount={columnCount}

@@ -1,20 +1,24 @@
 'use client'
 
 // گزارش چاپی هوشمند درون‌برنامه‌ای — همان گزارشی که سامانه خودش می‌سازد
-// خروجی موتور داشبورد خودکار به سند چاپ‌پذیر (چاپ/PDF و دانلود HTML مستقل) تبدیل می‌شود؛
-// دقیقاً همان ظاهر نمونه‌های HTML کاربر اما برای «هر» مجموعه‌داده و بدون هیچ پیکربندی.
-// پیش‌نمایش درون‌برنامه‌ای از همان سازنده گزارش مستقل (buildSmartReportInner) استفاده می‌کند
+// فاز هجدهم: اگر تحلیل عمیق فایل منبع موجود باشد (deep)، گزارش «تحلیلی جامع»
+// (خلاصه مدیریتی، روند سالانه/ماهانه/فصلی، ترکیب سبد، مالی، قرارداد، SWOT، نقشه راه)
+// رندر می‌شود؛ در غیر این‌صورت گزارش عمومی داشبورد خودکار.
+// پیش‌نمایش درون‌برنامه‌ای از همان سازنده گزارش مستقل استفاده می‌کند
 // تا ظاهر پیش‌نمایش، فایل دانلودی و لینک عمومی همیشه یکسان بماند.
 
 import { useMemo } from 'react'
 import type { AutoDash } from '@/lib/autodash'
+import type { DeepAnalysis } from '@/lib/deep-analysis'
 import { buildSmartReportInner, SMART_REPORT_CSS } from '@/lib/smart-report'
+import { buildDeepReportInner, DEEP_REPORT_CSS } from '@/lib/deep-report'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/HelpTip'
 import { Printer, FileCode2 } from 'lucide-react'
 
-export default function SmartReportView({ dash, datasetName, dataVersion, columnCount, projectName, canExportHtml, datasetId }: {
+export default function SmartReportView({ dash, deep, datasetName, dataVersion, columnCount, projectName, canExportHtml, datasetId }: {
   dash: AutoDash
+  deep?: DeepAnalysis | null
   datasetName: string
   dataVersion: number
   columnCount?: number
@@ -28,20 +32,31 @@ export default function SmartReportView({ dash, datasetName, dataVersion, column
   )
 
   // سند گزارش — بدون دستکاری memoization (سازگار با React Compiler)
-  const html = buildSmartReportInner(dash, {
-    title: dash.title || `${datasetName} — گزارش هوشمند`,
-    datasetName,
-    project: projectName,
-    rowCount: dash.rowCount,
-    columnCount: columnCount ?? 0,
-    dataVersion,
-    generatedAtFa: metaFa,
-  })
+  const isDeep = !!deep?.ok
+  const html = isDeep
+    ? buildDeepReportInner(deep!, {
+        title: dash.title || `${datasetName} — گزارش تحلیلی جامع`,
+        datasetName,
+        project: projectName,
+        rowCount: dash.rowCount,
+        columnCount: columnCount ?? 0,
+        dataVersion,
+        generatedAtFa: metaFa,
+      })
+    : buildSmartReportInner(dash, {
+        title: dash.title || `${datasetName} — گزارش هوشمند`,
+        datasetName,
+        project: projectName,
+        rowCount: dash.rowCount,
+        columnCount: columnCount ?? 0,
+        dataVersion,
+        generatedAtFa: metaFa,
+      })
 
   return (
     <div className="smart-report-doc space-y-3">
       {/* استایل گزارش + قاعده چاپ: هنگام چاپ فقط سند گزارش دیده می‌شود */}
-      <style dangerouslySetInnerHTML={{ __html: SMART_REPORT_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: isDeep ? DEEP_REPORT_CSS : SMART_REPORT_CSS }} />
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           body * { visibility: hidden !important; }
@@ -54,7 +69,9 @@ export default function SmartReportView({ dash, datasetName, dataVersion, column
 
       <div className="no-print flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-2.5 dark:border-emerald-900/50 dark:bg-emerald-950/30">
         <div className="text-xs leading-5 text-emerald-800 dark:text-emerald-300">
-          این گزارش به‌صورت خودکار توسط سامانه ساخته شده است — برای دریافت فایل مشابه نمونه‌های HTML، از «دانلود HTML» استفاده کنید یا با «چاپ / PDF» خروجی بگیرید.
+          {isDeep
+            ? 'گزارش تحلیلی جامع از ساختار واقعی فایل منبع (همه شیت‌ها) ساخته شده است — خلاصه مدیریتی، روند سالانه/ماهانه، ترکیب سبد، تحلیل مالی، SWOT و صحت‌سنجی. برای فایل مستقل از «دانلود HTML» استفاده کنید.'
+            : 'این گزارش به‌صورت خودکار توسط سامانه ساخته شده است — برای دریافت فایل مشابه نمونه‌های HTML، از «دانلود HTML» استفاده کنید یا با «چاپ / PDF» خروجی بگیرید.'}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Tip label="چاپ گزارش یا ذخیره به‌صورت PDF — قالب A4 فارسی و راست‌به‌چپ" side="bottom">
