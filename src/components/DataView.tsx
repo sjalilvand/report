@@ -21,7 +21,7 @@ import { formatNumber } from '@/lib/currency'
 import { Tip } from './HelpTip'
 import {
   Upload, FileSpreadsheet, Trash2, Database, AlertTriangle, CheckCircle2, FileDown,
-  Loader2, Table2, Eye, Layers, Info, Combine, CheckCheck, XCircle,
+  Loader2, Table2, Eye, Layers, Info, Combine, CheckCheck, XCircle, Sparkles,
 } from 'lucide-react'
 
 interface SheetInfo {
@@ -46,6 +46,14 @@ interface UploadedFile {
 }
 
 type ProjectFile = UploadedFile
+
+// برچسب مراحل پایپ‌لاین خودکار — تجربه یک‌کلیکی پس از بارگذاری
+const AUTO_STEP_LABELS: Record<string, string> = {
+  detect: 'شناسایی ساختار',
+  dataset: 'ساخت مجموعه‌داده',
+  merge: 'تجمیع فایل‌های هم‌فرم',
+  dash: 'تحلیل و داشبورد هوشمند',
+}
 
 export default function DataView({
   projectId,
@@ -90,6 +98,12 @@ export default function DataView({
   const [mergeName, setMergeName] = useState('')
   const [merging, setMerging] = useState(false)
   const [checking, setChecking] = useState(false)
+
+  // ── پایپ‌لاین خودکار: بارگذاری ← مجموعه‌داده ← داشبورد هوشمند (بدون هیچ کلیک اضافه) ──
+  const [autoBusy, setAutoBusy] = useState(false)
+  const [autoStage, setAutoStage] = useState('')
+  const [autoSteps, setAutoSteps] = useState<string[]>([])
+  const [autoDetail, setAutoDetail] = useState('')
 
   const selectedCount = Object.keys(selectedFiles).length
   const toggleSelect = (f: ProjectFile, sheetName: string) => {
@@ -148,6 +162,93 @@ export default function DataView({
     }
   }
 
+  // بهترین برگه برای ساخت خودکار: بیشترین ناحیه داده با کمترین اخطار و سلول ادغام‌شده
+  const pickBestSheet = (sheets: SheetInfo[]): SheetInfo | null => {
+    const usable = sheets.filter(s => s.cols >= 2 && s.dataEndRow >= s.dataStartRow && s.dataEndRow - s.dataStartRow >= 1)
+    if (usable.length === 0) return null
+    const score = (s: SheetInfo) =>
+      (s.dataEndRow - s.dataStartRow + 1) * s.cols - s.mergedCells * 2 - s.warnings.length * 5
+    return [...usable].sort((a, b) => score(b) - score(a))[0]
+  }
+
+  const createDatasetAuto = async (fileId: string, sheetName: string, fileName: string) =>
+    api.post<{ datasetId: string; rowCount: number; fieldCount: number }>('/api/datasets', {
+      fileId,
+      sheetName,
+      name: `${fileName.replace(/\.[^.]+$/, '')} - ${sheetName}`,
+    })
+
+  const autoFail = (title: string, message: string) =>
+    toast({ title, description: `${message} می‌توانید از دکمه‌های شیت، پیکربندی دستی را انجام دهید.`, variant: 'destructive' })
+
+  // پایپ‌لاین ساخت خودکار: یک فایل ← بهترین برگه؛ چند فایل ← تجمیع خودکار هم‌فرم‌ها
+  const autoPipeline = async (newFiles: { fileId: string; name: string; sheets: SheetInfo[] }[]) => {
+    const multi = newFiles.length > 1
+    setAutoSteps(multi ? ['detect', 'dataset', 'merge', 'dash'] : ['detect', 'dataset', 'dash'])
+    const candidates = newFiles
+      .map(f => ({ f, best: pickBestSheet(f.sheets) }))
+      .filter((x): x is { f: { fileId: string; name: string; sheets: SheetInfo[] }; best: SheetInfo } => x.best !== null)
+    if (candidates.length === 0) {
+      autoFail('ساخت خودکار انجام نشد', 'در فایل(های) بارگذاری‌شده ناحیه داده قابل استخراج شناسایی نشد.')
+      return
+    }
+    try {
+      if (!multi) {
+        const { f, best } = candidates[0]
+        setAutoStage('dataset'); setAutoDetail(f.name)
+        const res = await createDatasetAuto(f.fileId, best.name, f.name)
+        setAutoStage('dash')
+        toast({
+          title: 'داشبورد هوشمند آماده شد',
+          description: `از شیت «${best.name}» با ${formatNumber(res.rowCount)} رکورد، مجموعه‌داده و داشبورد هوشمند به‌طور خودکار ساخته شد.`,
+        })
+        onDatasetCreated(res.datasetId)
+        return
+      }
+      // چند فایل: ابتدا بررسی هم‌فرم بودن، سپس تجمیع خودکار
+      setAutoStage('merge'); setAutoDetail(`${formatNumber(candidates.length)} فایل`)
+      const items = candidates.map(x => ({ fileId: x.f.fileId, sheetName: x.best.name }))
+      const check = await api.post<typeof mergeCheck & object>('/api/files/merge', { projectId, dryRun: true, items })
+      if (check.allMatch) {
+        const res = await api.post<{ datasetId: string; rowCount: number; sourceCount: number }>('/api/files/merge', {
+          projectId, dryRun: false, name: `تجمیع خودکار ${candidates.length} فایل`, items,
+        })
+        setAutoStage('dash')
+        toast({
+          title: 'تجمیع خودکار و داشبورد هوشمند آماده شد',
+          description: `${formatNumber(res.rowCount)} رکورد از ${formatNumber(res.sourceCount)} فایل یکپارچه شد و داشبورد هوشمند ساخته شد.`,
+        })
+        onDatasetCreated(res.datasetId)
+      } else {
+        // ساختار فایل‌ها یکسان نیست ← بزرگ‌ترین فایل به‌عنوان مجموعه‌داده اصلی
+        const sorted = [...candidates].sort((a, b) =>
+          (b.best.dataEndRow - b.best.dataStartRow) - (a.best.dataEndRow - a.best.dataStartRow))
+        const first = sorted[0]
+        setAutoStage('dataset'); setAutoDetail(first.f.name)
+        const res = await createDatasetAuto(first.f.fileId, first.best.name, first.f.name)
+        setAutoStage('dash')
+        toast({
+          title: 'ساختار فایل‌ها یکسان نبود',
+          description: `مجموعه‌داده و داشبورد از «${first.f.name}» ساخته شد؛ برای تجمیع سایر فایل‌ها، آن‌ها را در فهرست تیک بزنید و «تجمیع» را بزنید.`,
+        })
+        onDatasetCreated(res.datasetId)
+      }
+    } catch (e) {
+      autoFail('ساخت خودکار داشبورد انجام نشد', e instanceof Error ? e.message : 'خطای ناشناخته.')
+    }
+  }
+
+  // ساخت خودکار برای فایل‌های قبلاً بارگذاری‌شده (بدون بارگذاری مجدد)
+  const autoCreateFromFile = async (f: ProjectFile) => {
+    const sheets: SheetInfo[] = JSON.parse(f.sheetInfo || '[]')
+    setAutoBusy(true)
+    try {
+      await autoPipeline([{ fileId: f.id, name: f.name, sheets }])
+    } finally {
+      setAutoBusy(false); setAutoStage(''); setAutoDetail('')
+    }
+  }
+
   const loadFiles = useCallback(async () => {
     try {
       const p = await api.get<{ files: ProjectFile[] }>(`/api/projects/${projectId}`)
@@ -162,25 +263,36 @@ export default function DataView({
   const upload = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return
     setUploading(true)
+    setAutoBusy(true)
+    setAutoSteps(fileList.length > 1 ? ['detect', 'dataset', 'merge', 'dash'] : ['detect', 'dataset', 'dash'])
+    setAutoStage('detect')
     try {
-      let okCount = 0
-      let dupCount = 0
+      const newFiles: { fileId: string; name: string; sheets: SheetInfo[] }[] = []
+      const dupNames: string[] = []
       for (const f of Array.from(fileList)) {
         const form = new FormData()
         form.append('file', f)
         form.append('projectId', projectId)
-        const res = await api.postForm<{ duplicate: boolean; message?: string }>('/api/files/upload', form)
-        if (res.duplicate) {
-          dupCount++
-          toast({ title: 'فایل تکراری', description: `${f.name}: ${res.message}`, variant: 'default' })
-        } else okCount++
+        const res = await api.postForm<{ duplicate: boolean; message?: string; fileId?: string; detection?: { sheets: SheetInfo[] } }>('/api/files/upload', form)
+        if (res.duplicate || !res.fileId) {
+          dupNames.push(f.name)
+          continue
+        }
+        newFiles.push({ fileId: res.fileId, name: f.name, sheets: res.detection?.sheets ?? [] })
       }
-      if (okCount > 0) toast({ title: 'بارگذاری کامل شد', description: `${okCount} فایل جدید پردازش و ساختار آن شناسایی شد (بخش ۶ سند — مرحله سوم).` })
-      loadFiles()
+      if (dupNames.length > 0) toast({ title: 'فایل تکراری', description: `${dupNames.join('، ')} قبلاً بارگذاری شده بود (تشخیص اثر انگشت — بخش ۷.۱ سند).` })
+      if (newFiles.length > 0) {
+        await loadFiles()
+        // تجربه هوشمند: بدون هیچ کلیک اضافه، مجموعه‌داده و داشبورد هوشمند ساخته می‌شود
+        await autoPipeline(newFiles)
+      }
     } catch (e) {
       toast({ title: 'خطا در بارگذاری', description: e instanceof Error ? e.message : '', variant: 'destructive' })
     } finally {
       setUploading(false)
+      setAutoBusy(false)
+      setAutoStage('')
+      setAutoDetail('')
       if (inputRef.current) inputRef.current.value = ''
     }
   }
@@ -267,7 +379,7 @@ export default function DataView({
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base"><Upload className="size-4" /> بارگذاری فایل‌ها</CardTitle>
           <CardDescription>
-            پشتیبانی از XLSX و CSV با چند شیت، سرستون در سطرهای بعدی، سلول‌های ادغام‌شده و ساختارهای نامنظم (بخش‌های ۳.۱ و ۳.۲ سند)
+            پس از بارگذاری، سامانه به‌طور خودکار بهترین برگه را انتخاب می‌کند، مجموعه‌داده می‌سازد و داشبورد هوشمند را نمایش می‌دهد — چند فایل هم‌فرم هم به‌طور خودکار تجمیع می‌شود (بخش‌های ۳.۱، ۳.۲ و ۶ سند)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -290,7 +402,7 @@ export default function DataView({
                 </Button>
               </Tip>
             </div>
-            <p className="text-xs text-muted-foreground">حفظ داده خام: فایل اصلی تغییر نمی‌کند و هر فایل با اثر انگشت محتوا ثبت می‌شود (بخش ۴ و ۷.۱ سند)</p>
+            <p className="text-xs text-muted-foreground">پس از بارگذاری، ساخت داشبورد هوشمند به‌طور خودکار انجام می‌شود | حفظ داده خام: فایل اصلی تغییر نمی‌کند و هر فایل با اثر انگشت محتوا ثبت می‌شود (بخش ۴ و ۷.۱ سند)</p>
             <input
               ref={inputRef} type="file" className="hidden" multiple
               accept=".xlsx,.xls,.csv,.tsv,.xlsm"
@@ -298,6 +410,28 @@ export default function DataView({
               aria-label="انتخاب فایل اکسل"
             />
           </div>
+          {/* نوار پیشرفت پایپ‌لاین خودکار — تجربه یک‌کلیکی */}
+          {autoBusy && autoSteps.length > 0 && (
+            <div className="mt-4 rounded-xl border border-primary/40 bg-primary/5 p-4">
+              <p className="flex items-center gap-2 text-sm font-medium text-primary">
+                <Loader2 className="size-4 animate-spin" />
+                در حال ساخت داشبورد هوشمند{autoDetail ? ` برای «${autoDetail}»` : ''}…
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                {autoSteps.map((s, i) => {
+                  const cur = autoSteps.indexOf(autoStage)
+                  const done = cur > -1 && i < cur
+                  const active = s === autoStage
+                  return (
+                    <span key={s} className={`flex items-center gap-1.5 text-xs ${active ? 'font-semibold text-primary' : done ? 'text-emerald-600' : 'text-muted-foreground'}`}>
+                      {done ? <CheckCircle2 className="size-3.5" /> : active ? <Loader2 className="size-3.5 animate-spin" /> : <span className="inline-block size-3.5 rounded-full border" aria-hidden />}
+                      {i + 1}. {AUTO_STEP_LABELS[s] ?? s}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           {/* نمونه فایل‌های واقعی — بخش ۳۶ سند: نمونه فایل‌های واقعی برای آزمون */}
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 p-3">
             <FileDown className="size-4 text-primary" />
@@ -323,7 +457,7 @@ export default function DataView({
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base"><Layers className="size-4" /> فایل‌های پروژه «{activeProjectName}»</CardTitle>
             <CardDescription>
-              برای تجمیع چند فایل هم‌فرم (مثلاً فیش حقوقی چند ماه)، فایل‌ها را تیک بزنید و دکمه «تجمیع» را بزنید — ساختار فایل‌ها به‌صورت خودکار مقایسه می‌شود
+              دکمه «ساخت خودکار داشبورد» بهترین برگه را انتخاب و داشبورد را فوری می‌سازد | برای تجمیع چند فایل هم‌فرم (مثلاً فیش حقوقی چند ماه)، فایل‌ها را تیک بزنید و «تجمیع» را بزنید — ساختار فایل‌ها به‌صورت خودکار مقایسه می‌شود
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -365,9 +499,17 @@ export default function DataView({
                         </p>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={() => deleteFile(f)} aria-label={`حذف ${f.name}`}>
-                      <Trash2 className="size-4 text-destructive" />
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Tip label="ساخت خودکار مجموعه‌داده از بهترین برگه و نمایش فوری داشبورد هوشمند — بدون پیکربندی دستی">
+                        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => autoCreateFromFile(f)} disabled={autoBusy}>
+                          <Sparkles className="size-3.5 text-primary" />
+                          ساخت خودکار داشبورد
+                        </Button>
+                      </Tip>
+                      <Button variant="ghost" size="icon" onClick={() => deleteFile(f)} aria-label={`حذف ${f.name}`}>
+                        <Trash2 className="size-4 text-destructive" />
+                      </Button>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {sheets.map(s => (
