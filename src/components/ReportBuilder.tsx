@@ -28,7 +28,7 @@ import {
   Save, FileDown, FileText, Grid3X3, X, Plus, Kanban, BookMarked, LayoutDashboard,
   TableProperties, ChevronDown, ZoomIn, RotateCcw, Crosshair, Layers, Link2,
   Combine, Activity, Flame, Boxes, TrendingUp, Filter, LayoutGrid, Presentation, ListTodo,
-  MapPin, Scale, Sparkles, ArrowUpRight, ArrowDownRight, Target,
+  MapPin, Scale, Sparkles, ArrowUpRight, ArrowDownRight, Target, ShieldCheck, Info,
 } from 'lucide-react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -87,7 +87,27 @@ interface PivotResp {
 
 type ChartType = 'table' | 'pivot' | 'matrix' | 'heatmap' | 'bar' | 'line' | 'pie' | 'kpi' | 'dashboard'
   | 'combined' | 'scatter' | 'histogram' | 'box' | 'waterfall' | 'funnel' | 'treemap'
-  | 'compare' | 'geomap'
+  | 'compare' | 'geomap' | 'quality'
+
+// جدول کیفیت داده — بخش ۱۹.۲ («جدول کیفیت داده») بر پایه موتور پروفایل بخش ۹
+interface QualityField {
+  fieldId: string; total: number; nullCount: number; nullPercent: number
+  distinctCount: number
+  topValues: { value: string; count: number; percent: number }[]
+  min?: number | string; max?: number | string; mean?: number; median?: number
+  minLength?: number; maxLength?: number
+  typeDistribution: Record<string, number>
+  patternViolations: number
+  quality: 'valid' | 'partial' | 'inconsistent'
+}
+interface QualityResp {
+  dataset: { id: string; name: string; version: number; updatedAt: string; rowCount: number }
+  rowCount: number; visibleRowCount: number; duplicateRows: number
+  dateRange?: { field: string; from: string; to: string; invalid: number }
+  warnings: string[]
+  fields: QualityField[]
+  maskedColumns: string[]
+}
 type CrossFilterState = { fieldId: string; value: string } | null
 type DrillStep = { fieldId: string; value: string }
 
@@ -166,6 +186,18 @@ export default function ReportBuilder({
   const [crossFilter, setCrossFilter] = useState<CrossFilterState>(null)
   const [dashData, setDashData] = useState<{ main: QueryResp; chartA: QueryResp; chartB: QueryResp } | null>(null)
   const [dashLoading, setDashLoading] = useState(false)
+
+  // جدول کیفیت داده — بخش ۱۹.۲
+  const [qualityData, setQualityData] = useState<QualityResp | null>(null)
+  const [qualityLoading, setQualityLoading] = useState(false)
+  const [qualityDetail, setQualityDetail] = useState<QualityField | null>(null)
+
+  // متن، تصویر، لوگو و توضیح — اجزای گزارش ۱۹.۲
+  const [repText, setRepText] = useState('')
+  const [repImageUrl, setRepImageUrl] = useState('')
+  const [showElements, setShowElements] = useState(false)
+  // بخش فرمول و شناسنامه شاخص — ۱۹.۲
+  const [showIdentity, setShowIdentity] = useState(true)
 
   // Drill Through — صفحه جزئیات رکورد
   const [drillThrough, setDrillThrough] = useState<null | { title: string; filters: QueryFilter[] }>(null)
@@ -338,6 +370,21 @@ export default function ReportBuilder({
       toast({ title: 'خطا', description: e instanceof Error ? e.message : '', variant: 'destructive' })
     } finally {
       setSpecialLoading(false)
+    }
+  }
+
+  // جدول کیفیت داده — بخش ۱۹.۲: پروفایل بخش ۹ با دسترسی سطری و ماسک (سمت سرور)
+  const runQuality = async () => {
+    if (!dataset) return
+    setQualityLoading(true)
+    try {
+      const res = await api.get<QualityResp>(`/api/datasets/${dataset.id}/quality`)
+      setQualityData(res)
+      setResult(null); setPivotResult(null); setDashData(null); setHisto(null); setBox(null)
+    } catch (e) {
+      toast({ title: 'خطا در جدول کیفیت داده', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    } finally {
+      setQualityLoading(false)
     }
   }
 
@@ -544,6 +591,9 @@ export default function ReportBuilder({
           pivot: { rowDims: pivotRowDims, colDim: pivotColDim, ...pivotOpts },
           special: { fieldId: specialField, binCount, groupFieldId: boxGroupField },
           compare: { mode: cmpMode, a: cmpA, b: cmpB, target: cmpTarget },
+          // اجزای گزارش ۱۹.۲ — متن، تصویر، لوگو و توضیح + بخش فرمول و شناسنامه شاخص
+          elements: { text: repText, imageUrl: repImageUrl },
+          identity: { show: showIdentity },
         },
       })
       if (thenSubmit) {
@@ -756,8 +806,39 @@ export default function ReportBuilder({
     if (chartType === 'pivot' || chartType === 'matrix' || chartType === 'heatmap') runPivot()
     else if (chartType === 'histogram' || chartType === 'box') runSpecial()
     else if (chartType === 'dashboard') runDashboard()
+    else if (chartType === 'quality') runQuality()
     else run()
   }
+
+  // برچسب فارسی نوع نمایش — برای شناسنامه شاخص (۱۹.۲)
+  const CHART_LABELS: Record<ChartType, string> = {
+    table: 'جدول', pivot: 'جدول محوری', matrix: 'ماتریس', heatmap: 'نقشه حرارتی', bar: 'میله‌ای/ستونی',
+    line: 'خطی', pie: 'دایره‌ای', kpi: 'کارت شاخص', dashboard: 'داشبورد Cross Filter',
+    combined: 'ترکیبی میله‌ای + خطی', scatter: 'پراکندگی', histogram: 'هیستوگرام', box: 'جعبه‌ای',
+    waterfall: 'آبشاری', funnel: 'قیفی', treemap: 'سهم گروه‌ها', compare: 'کارت مقایسه‌ای',
+    geomap: 'نقشه جغرافیایی', quality: 'جدول کیفیت داده',
+  }
+  const chartTypeLabel = CHART_LABELS[chartType]
+
+  // فرمول شاخص به زبان انسانی — بخش فرمول و شناسنامه شاخص (۱۹.۲)
+  const identityFormula = useMemo(() => {
+    if (selMeasures.length === 0) return ''
+    const aggNames: Record<string, string> = {
+      sum: 'جمع', avg: 'میانگین', count: 'تعداد رکورد', countDistinct: 'تعداد متمایز',
+      min: 'کمینه', max: 'بیشینه', median: 'میانه', last: 'آخرین',
+    }
+    const parts = selMeasures.map(m => m.agg === 'count' ? 'تعداد رکورد' : `${aggNames[m.agg] ?? m.agg}(${fieldLabel(m.fieldId)})`)
+    let f = parts.join(' و ')
+    if (chartType === 'pivot' || chartType === 'matrix' || chartType === 'heatmap') {
+      if (pivotRowDims.length > 0) f += ` به تفکیک ${pivotRowDims.map(d => `«${fieldLabel(d)}»`).join(' و ')}`
+      if (pivotColDim && pivotColDim !== '—') f += ` در ستون «${fieldLabel(pivotColDim)}»`
+    } else if (selDims.length > 0) {
+      f += ` به تفکیک ${selDims.map(d => `«${fieldLabel(d)}»`).join(' و ')}`
+    }
+    if (isAmount && amountUnit) f += ` — واحد نمایش: ${getUnit(amountUnit).label}`
+    return f
+     
+  }, [selMeasures, selDims, chartType, pivotRowDims, pivotColDim, amountUnit, fields])
 
   // رنگ‌بندی آستانه‌ای ماتریس/حرارتی — بخش ۱۹.۴ (مقیاس سبز روشن تا تیره)
   const matrixHeat = useMemo(() => {
@@ -1188,6 +1269,7 @@ export default function ReportBuilder({
                     <SelectItem value="kpi"><span className="flex items-center gap-1.5"><Kanban className="size-3.5" /> کارت شاخص</span></SelectItem>
                     <SelectItem value="compare"><span className="flex items-center gap-1.5"><Scale className="size-3.5" /> کارت مقایسه‌ای (۱۹.۲)</span></SelectItem>
                     <SelectItem value="geomap"><span className="flex items-center gap-1.5"><MapPin className="size-3.5" /> نقشه جغرافیایی (۱۹.۲)</span></SelectItem>
+                    <SelectItem value="quality"><span className="flex items-center gap-1.5"><ShieldCheck className="size-3.5" /> جدول کیفیت داده (۱۹.۲)</span></SelectItem>
                   </SelectContent>
                 </Select>
                 {/* پیشنهاد نمودار هوشمند — بخش ۲۵ */}
@@ -1199,9 +1281,9 @@ export default function ReportBuilder({
                 </Button>
                 <Button
                   onClick={execute}
-                  disabled={loading || pivotLoading || dashLoading || specialLoading} className="h-8 gap-1.5 text-xs"
+                  disabled={loading || pivotLoading || dashLoading || specialLoading || qualityLoading} className="h-8 gap-1.5 text-xs"
                 >
-                  {loading || pivotLoading || dashLoading || specialLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} اجرای گزارش
+                  {loading || pivotLoading || dashLoading || specialLoading || qualityLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} اجرای گزارش
                 </Button>
               </div>
             </div>
@@ -1239,6 +1321,89 @@ export default function ReportBuilder({
                 <Button variant="ghost" size="sm" className="ms-auto h-6 gap-1 px-2 text-[11px]" onClick={resetInteractions}>
                   <RotateCcw className="size-3" /> بازگشت به وضعیت پیش‌فرض
                 </Button>
+              </div>
+            )}
+
+            {/* اجزای گزارش — متن، تصویر، لوگو و توضیح + بخش فرمول و شناسنامه شاخص (۱۹.۲) */}
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <Button
+                variant="outline" size="sm" className="h-7 gap-1.5 text-[11px]"
+                onClick={() => setShowElements(v => !v)}
+              >
+                <BookMarked className="size-3.5" /> متن، تصویر، لوگو و توضیح (۱۹.۲)
+              </Button>
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none">
+                <Switch checked={showIdentity} onCheckedChange={setShowIdentity} className="scale-90" />
+                بخش فرمول و شناسنامه شاخص (۱۹.۲)
+              </label>
+            </div>
+
+            {showElements && (
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-2 mb-3">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">نشانی لوگو یا تصویر (URL)</Label>
+                    <Input
+                      value={repImageUrl} onChange={e => setRepImageUrl(e.target.value)}
+                      placeholder="https://example.com/logo.png"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">متن و توضیح گزارش</Label>
+                    <Textarea
+                      value={repText} onChange={e => setRepText(e.target.value)}
+                      placeholder="متن توضیحی گزارش — مانند «گزارش فروش فصل چهارم بر پایه داده ثبت‌شده در سامانه»"
+                      className="min-h-[64px] text-xs"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  این اجزا بالای خروجی گزارش نمایش داده می‌شوند و همراه پیکربندی گزارش ذخیره می‌گردند (بخش ۱۹.۲ سند).
+                </p>
+              </div>
+            )}
+
+            {/* بخش فرمول و شناسنامه شاخص — ۱۹.۲: شفافیت محاسبات و منبع داده */}
+            {showIdentity && (
+              <div className="rounded-lg border bg-card p-3 mb-3 grid gap-3 sm:grid-cols-2 text-xs">
+                <div className="space-y-1.5">
+                  <p className="flex items-center gap-1.5 font-semibold text-[12px]"><Info className="size-3.5 text-teal-600" /> شناسنامه شاخص</p>
+                  <ul className="space-y-1 text-muted-foreground leading-5">
+                    <li>مجموعه‌داده: <span className="text-foreground font-medium">{dataset?.name ?? '—'}</span></li>
+                    <li>تعداد رکورد: <span className="text-foreground font-medium tabular-nums">{dataset ? formatNumber(dataset.rowCount) : '—'}</span></li>
+                    <li>نسخه: <span className="text-foreground font-medium tabular-nums">{dataset ? toPersianDigits(String(dataset.version)) : '—'}</span></li>
+                    <li>نوع نمایش: <span className="text-foreground font-medium">{chartTypeLabel}</span></li>
+                  </ul>
+                </div>
+                <div className="space-y-1.5">
+                  <p className="flex items-center gap-1.5 font-semibold text-[12px]"><BookMarked className="size-3.5 text-teal-600" /> فرمول شاخص</p>
+                  <p className="leading-5 text-muted-foreground" dir="rtl">
+                    {identityFormula || 'هنوز سنجه‌ای انتخاب نشده است — پس از انتخاب سنجه، فرمول محاسبه اینجا نمایش داده می‌شود.'}
+                  </p>
+                  {filters.length > 0 && (
+                    <p className="leading-5 text-muted-foreground">
+                      فیلترها: {filters.map(f => `«${fieldLabel(f.fieldId)}» ${(opLabels as Record<string, string>)[f.op] ?? f.op} «${f.value}»`).join('، ')}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* نمایش اجزای متنی/تصویری در خروجی گزارش */}
+            {(repImageUrl.trim() !== '' || repText.trim() !== '') && (
+              <div className="rounded-lg border p-3 mb-3 space-y-2">
+                {repImageUrl.trim() !== '' && (
+                   
+                  <img
+                    src={repImageUrl.trim()} alt="لوگو یا تصویر گزارش"
+                    className="max-h-16 w-auto object-contain"
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                  />
+                )}
+                {repText.trim() !== '' && (
+                  <p className="text-xs leading-6 text-muted-foreground whitespace-pre-wrap">{repText}</p>
+                )}
               </div>
             )}
 
@@ -1694,6 +1859,148 @@ export default function ReportBuilder({
                       </p>
                     )}
                   </div>
+                ) : chartType === 'quality' ? (
+                  qualityLoading ? (
+                    <div className="flex items-center justify-center py-10 text-xs text-muted-foreground gap-2">
+                      <Loader2 className="size-4 animate-spin" /> در حال محاسبه جدول کیفیت داده…
+                    </div>
+                  ) : qualityData ? (
+                    <div className="space-y-3">
+                      {/* خلاصه کیفیت کل مجموعه‌داده */}
+                      <div className="grid gap-2 grid-cols-2 sm:grid-cols-4 text-xs">
+                        <div className="rounded-lg border p-2.5">
+                          <p className="text-muted-foreground text-[11px]">رکوردهای بررسی‌شده</p>
+                          <p className="text-sm font-semibold tabular-nums">{formatNumber(qualityData.visibleRowCount)}</p>
+                        </div>
+                        <div className="rounded-lg border p-2.5">
+                          <p className="text-muted-foreground text-[11px]">سطرهای تکراری کامل</p>
+                          <p className={`text-sm font-semibold tabular-nums ${qualityData.duplicateRows > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                            {formatNumber(qualityData.duplicateRows)}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border p-2.5">
+                          <p className="text-muted-foreground text-[11px]">ستون‌های دارای مشکل کیفیت</p>
+                          <p className="text-sm font-semibold tabular-nums">
+                            {formatNumber(qualityData.fields.filter(p => p.quality !== 'valid').length)} / {formatNumber(qualityData.fields.length)}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border p-2.5">
+                          <p className="text-muted-foreground text-[11px]">بازه زمانی داده</p>
+                          <p className="text-sm font-semibold">
+                            {qualityData.dateRange ? `${toPersianDigits(qualityData.dateRange.from.slice(0, 10))} تا ${toPersianDigits(qualityData.dateRange.to.slice(0, 10))}` : '—'}
+                          </p>
+                        </div>
+                      </div>
+                      {qualityData.maskedColumns.length > 0 && (
+                        <Alert className="py-2 text-xs">
+                          <ShieldCheck className="size-3.5" />
+                          <AlertDescription>
+                            آمار مقادیر ستون‌های محرمانه «{qualityData.maskedColumns.join('، ')}» طبق مجوز شما پوشانده شد (بخش ۲۹ سند).
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {qualityData.warnings.map((w, i) => (
+                        <p key={i} className="text-[11px] text-amber-600 leading-5">• {w}</p>
+                      ))}
+                      {/* جدول کیفیت — بخش ۱۹.۲ */}
+                      <div className="rounded-lg border max-h-[30rem] overflow-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="text-xs">ستون</TableHead>
+                              <TableHead className="text-xs text-center">خالی</TableHead>
+                              <TableHead className="text-xs text-center">٪ خالی</TableHead>
+                              <TableHead className="text-xs text-center">متمایز</TableHead>
+                              <TableHead className="text-xs text-center">کمینه / بیشینه</TableHead>
+                              <TableHead className="text-xs text-center">میانگین / میانه</TableHead>
+                              <TableHead className="text-xs text-center">خارج از الگو</TableHead>
+                              <TableHead className="text-xs text-center">وضعیت کیفیت</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {qualityData.fields.map(p => {
+                              const meta = fields.find(f => f.id === p.fieldId)
+                              const fmtVal = (v: number | string | undefined) =>
+                                v === undefined ? '—' : typeof v === 'number' ? formatNumber(Math.round(v * 100) / 100) : toPersianDigits(v.slice(0, 10))
+                              const qBadge = p.quality === 'valid'
+                                ? <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 text-[10px]">سالم</Badge>
+                                : p.quality === 'partial'
+                                  ? <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 text-[10px]">ناقص</Badge>
+                                  : <Badge className="bg-red-100 text-red-800 hover:bg-red-100 text-[10px]">ناسازگار</Badge>
+                              return (
+                                <TableRow
+                                  key={p.fieldId} className="cursor-pointer hover:bg-muted/50"
+                                  onClick={() => setQualityDetail(p)}
+                                >
+                                  <TableCell className="text-xs font-medium">{meta?.label ?? p.fieldId}</TableCell>
+                                  <TableCell className="text-xs text-center tabular-nums">{formatNumber(p.nullCount)}</TableCell>
+                                  <TableCell className="text-xs text-center tabular-nums">{toPersianDigits((p.nullPercent * 100).toFixed(1))}٪</TableCell>
+                                  <TableCell className="text-xs text-center tabular-nums">{formatNumber(p.distinctCount)}</TableCell>
+                                  <TableCell className="text-xs text-center tabular-nums text-[11px]">{fmtVal(p.min)} / {fmtVal(p.max)}</TableCell>
+                                  <TableCell className="text-xs text-center tabular-nums text-[11px]">{p.mean !== undefined ? fmtVal(p.mean) : '—'} / {p.median !== undefined ? fmtVal(p.median) : '—'}</TableCell>
+                                  <TableCell className="text-xs text-center tabular-nums">
+                                    {p.patternViolations > 0 ? <span className="text-red-600 font-medium">{formatNumber(p.patternViolations)}</span> : '—'}
+                                  </TableCell>
+                                  <TableCell className="text-center">{qBadge}</TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        برای جزئیات هر ستون (پرتکرارها و توزیع نوع) روی سطر کلیک کنید — محاسبه بر پایه پروفایل بخش ۹ سند با رعایت دسترسی سطری (بخش ۲۹).
+                      </p>
+                      {/* دیالوگ جزئیات ستون */}
+                      <Dialog open={!!qualityDetail} onOpenChange={o => !o && setQualityDetail(null)}>
+                        <DialogContent className="max-w-lg">
+                          <DialogHeader>
+                            <DialogTitle className="text-sm">جزئیات کیفیت ستون «{fields.find(f => f.id === qualityDetail?.fieldId)?.label ?? qualityDetail?.fieldId}»</DialogTitle>
+                            <DialogDescription className="text-xs">فراوانی مقادیر پرتکرار و توزیع نوع واقعی داده (بخش ۹ سند)</DialogDescription>
+                          </DialogHeader>
+                          {qualityDetail && (
+                            <div className="space-y-3 text-xs">
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="rounded border p-2 text-center"><p className="text-muted-foreground text-[10px]">طول متن کمینه</p><p className="tabular-nums">{qualityDetail.minLength !== undefined ? toPersianDigits(String(qualityDetail.minLength)) : '—'}</p></div>
+                                <div className="rounded border p-2 text-center"><p className="text-muted-foreground text-[10px]">طول متن بیشینه</p><p className="tabular-nums">{qualityDetail.maxLength !== undefined ? toPersianDigits(String(qualityDetail.maxLength)) : '—'}</p></div>
+                                <div className="rounded border p-2 text-center"><p className="text-muted-foreground text-[10px]">مقادیر خارج از الگو</p><p className="tabular-nums">{formatNumber(qualityDetail.patternViolations)}</p></div>
+                              </div>
+                              <div>
+                                <p className="font-medium mb-1.5">پرتکرارترین مقادیر</p>
+                                <div className="space-y-1">
+                                  {qualityDetail.topValues.slice(0, 5).map((tv, i) => (
+                                    <div key={i} className="flex items-center gap-2">
+                                      <span className="w-32 truncate rounded bg-muted px-1.5 py-0.5" title={tv.value}>{tv.value}</span>
+                                      <div className="h-2 rounded bg-emerald-100 flex-1 overflow-hidden">
+                                        <div className="h-full bg-emerald-500" style={{ width: `${Math.round(tv.percent * 100)}%` }} />
+                                      </div>
+                                      <span className="tabular-nums text-muted-foreground w-24 text-left">{formatNumber(tv.count)} ({toPersianDigits((tv.percent * 100).toFixed(1))}٪)</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="font-medium mb-1.5">توزیع نوع داده</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {Object.entries(qualityDetail.typeDistribution).length === 0 ? (
+                                    <span className="text-muted-foreground">همه مقادیر خالی‌اند</span>
+                                  ) : Object.entries(qualityDetail.typeDistribution).map(([t, c]) => (
+                                    <Badge key={t} variant="outline" className="text-[10px]">
+                                      {t === 'number' ? 'عدد' : t === 'date' ? 'تاریخ' : t === 'boolean' ? 'بله/خیر' : 'متن'}: {formatNumber(c)}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </DialogContent>
+                      </Dialog>
+                    </div>
+                  ) : (
+                    <div className="py-10 text-center text-xs text-muted-foreground">
+                      برای مشاهده جدول کیفیت داده، دکمه «اجرای گزارش» را بزنید (بخش ۱۹.۲ سند).
+                    </div>
+                  )
                 ) : chartType === 'table' ? (
                   <>
                     <div className="rounded-lg border max-h-[28rem] overflow-auto">

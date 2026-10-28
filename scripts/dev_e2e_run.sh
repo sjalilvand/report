@@ -26,7 +26,7 @@ if [ "$READY" != "1" ]; then
 fi
 
 echo ""
-echo "▶ اجرای آزمون e2e (۳۶ فاز)…"
+echo "▶ اجرای آزمون e2e (۳۹ فاز)…"
 E2E_BASE="http://localhost:$PORT/api" bash scripts/e2e_test.sh
 E2E_CODE=$?
 

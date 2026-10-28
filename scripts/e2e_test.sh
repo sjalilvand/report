@@ -1317,4 +1317,54 @@ assert 0 < ach < 200, 'درصد تحقق هدف باید منطقی باشد'
 print(f'✓ حالت هدف: پایه {round(a):,} در برابر هدف {round(t):,} → تحقق {ach:.1f}٪')"
 
 echo ""
-echo "✓✓✓ هر ۳۸ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"
+echo "═══ ۳۹) تکمیل اجزای گزارش ۱۹.۲ — جدول کیفیت داده، متن/تصویر/لوگو، شناسنامه شاخص ═══"
+
+echo "── ۳۹.۱) جدول کیفیت داده: خلاصه و ستون‌ها (بخش ۱۹.۲ با موتور پروفایل ۹) ──"
+QF=$($CURL "$BASE/datasets/$DSID/quality")
+echo "$QF" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' not in d, 'مسیر کیفیت خطا داد: ' + str(d.get('error'))
+assert d['rowCount'] > 0, 'رکوردی برای پروفایل کیفیت نبود'
+assert len(d['fields']) > 0, 'ستونی برای پروفایل نبود'
+for f in d['fields']:
+    assert f['quality'] in ('valid','partial','inconsistent'), 'وضعیت کیفیت نامعتبر: ' + str(f['quality'])
+    assert 'nullCount' in f and 'distinctCount' in f, 'شمارنده‌های کلیدی ستون ناقص است'
+assert isinstance(d['duplicateRows'], int), 'سطر تکراری عدد نیست'
+assert d['maskedColumns'] == [], 'مدیر باید آمار کامل ببیند'
+assert d['dataset']['name'], 'شناسنامه مجموعه‌داده ناقص است'
+print('✓ جدول کیفیت داده:', d['rowCount'], 'رکورد |', len(d['fields']), 'ستون | سطر تکراری:', d['duplicateRows'], '| بازه:', (d.get('dateRange') or {}).get('from','—')[:10], 'تا', (d.get('dateRange') or {}).get('to','—')[:10])"
+
+echo "── ۳۹.۲) دسترسی سطری روی جدول کیفیت: کاربر با قاعده «تهران» فقط رکوردهای مجاز می‌بیند ──"
+$CURL -X POST "$BASE/auth/logout" > /dev/null
+$CURL -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{"username":"karbar1","password":"ramz1234","name":"کاربر مشاهده‌کننده"}' > /dev/null
+QF2=$($CURL "$BASE/datasets/$DSID/quality")
+echo "$QF2" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' not in d, 'کاربر مجاز نباید خطا بگیرد'
+assert d['visibleRowCount'] <= d['rowCount'], 'رکوردهای دیده‌شده نباید بیشتر از کل باشد'
+assert d['visibleRowCount'] < d['rowCount'], 'قاعده سطری تهران باید رکوردها را محدود کند (بخش ۲۹)'
+print('✓ پروفایل فقط روی رکوردهای مجاز:', d['visibleRowCount'], 'از', d['rowCount'], '— قواعد سطری در جدول کیفیت رعایت شد')"
+$CURL -X POST "$BASE/auth/logout" > /dev/null
+$CURL -X POST "$BASE/auth/login" -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123","name":"مدیر سامانه"}' > /dev/null
+
+echo "── ۳۹.۳) ذخیره گزارش با متن/تصویر/لوگو و شناسنامه شاخص (اجزای ۱۹.۲ در پیکربندی) ──"
+REP39=$($CURL -X POST "$BASE/reports" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"datasetId\":\"$DSID\",\"title\":\"گزارش با اجزای ۱۹.۲\",\"config\":{\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\"}],\"chartType\":\"bar\",\"elements\":{\"text\":\"گزارش آزمون اجزای متنی ۱۹.۲\",\"imageUrl\":\"https://example.com/logo.png\"},\"identity\":{\"show\":true}}}")
+RID39=$(echo "$REP39" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+$CURL "$BASE/reports/$RID39" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+cfg=d.get('config')
+if isinstance(cfg, str): cfg=json.loads(cfg)
+assert isinstance(cfg, dict), 'پیکربندی گزارش ذخیره نشد'
+el=cfg.get('elements') or {}
+ident=cfg.get('identity') or {}
+assert el.get('text') == 'گزارش آزمون اجزای متنی ۱۹.۲', 'متن گزارش در پیکربندی نماند'
+assert el.get('imageUrl') == 'https://example.com/logo.png', 'نشانی تصویر در پیکربندی نماند'
+assert ident.get('show') is True, 'شناسنامه شاخص در پیکربندی نماند'
+print('✓ اجزای گزارش ذخیره شد — متن و تصویر/لوگو + شناسنامه شاخص (۱۹.۲)')"
+$CURL -X DELETE "$BASE/reports/$RID39" > /dev/null 2>&1 || true
+
+echo ""
+echo "✓✓✓ هر ۳۹ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"
