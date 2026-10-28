@@ -154,7 +154,7 @@ export default function ReportBuilder({
   const measures = fields.filter(f => f.role === 'measure')
 
   const [selDims, setSelDims] = useState<string[]>([])
-  const [selMeasures, setSelMeasures] = useState<{ fieldId?: string; agg: string; displayUnit?: string }[]>([])
+  const [selMeasures, setSelMeasures] = useState<{ fieldId?: string; agg: string; displayUnit?: string; weightFieldId?: string; percentileP?: number }[]>([])
   const [chartType, setChartType] = useState<ChartType>('table')
   const [result, setResult] = useState<QueryResp | null>(null)
   const [loading, setLoading] = useState(false)
@@ -198,6 +198,22 @@ export default function ReportBuilder({
   const [showElements, setShowElements] = useState(false)
   // بخش فرمول و شناسنامه شاخص — ۱۹.۲
   const [showIdentity, setShowIdentity] = useState(true)
+
+  // محاسبات پنجره‌ای — مجموع تجمعی و میانگین متحرک (بخش ۱۳.۲)
+  const [winCalc, setWinCalc] = useState<{ type: 'cumsum' | 'movingAvg'; fieldAlias: string; window: number } | null>(null)
+  const windowAlias = winCalc && winCalc.fieldAlias
+    ? (winCalc.type === 'cumsum' ? `مجموع تجمعی ${winCalc.fieldAlias}` : `میانگین متحرک ${winCalc.fieldAlias}`)
+    : ''
+  const buildWindowCalcs = () => {
+    if (!winCalc || !winCalc.fieldAlias) return undefined
+    if (selDims.length === 0) return undefined // روی ردیف واحد معنا ندارد
+    return [{
+      type: winCalc.type,
+      fieldAlias: winCalc.fieldAlias,
+      window: winCalc.window,
+      alias: windowAlias,
+    }]
+  }
 
   // Drill Through — صفحه جزئیات رکورد
   const [drillThrough, setDrillThrough] = useState<null | { title: string; filters: QueryFilter[] }>(null)
@@ -293,6 +309,8 @@ export default function ReportBuilder({
         relationFilters: relationFilters(),
         descriptive: opts?.descriptive ?? false,
         dateField: fields.find(f => f.type === 'date')?.id,
+        // محاسبات پنجره‌ای روی نتیجه تجمیع‌شده — بخش ۱۳.۲
+        windowCalcs: buildWindowCalcs(),
       })
       setResult(res)
       setPivotResult(null)
@@ -1098,17 +1116,49 @@ export default function ReportBuilder({
                     </SelectContent>
                   </Select>
                   <Select value={m.agg} onValueChange={v => setSelMeasures(ms => ms.map((x, j) => j === i ? { ...x, agg: v } : x))}>
-                    <SelectTrigger className="h-7 text-xs w-28"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="h-7 text-xs w-32"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="sum">جمع</SelectItem>
                       <SelectItem value="avg">میانگین</SelectItem>
+                      <SelectItem value="weightedAvg">میانگین وزنی (۱۳.۱)</SelectItem>
                       <SelectItem value="count">تعداد رکورد</SelectItem>
                       <SelectItem value="countDistinct">تعداد متمایز</SelectItem>
                       <SelectItem value="min">کمینه</SelectItem>
                       <SelectItem value="max">بیشینه</SelectItem>
                       <SelectItem value="median">میانه</SelectItem>
+                      <SelectItem value="mode">نما (۱۳.۱)</SelectItem>
+                      <SelectItem value="range">دامنه تغییرات (۱۳.۱)</SelectItem>
+                      <SelectItem value="variance">واریانس (۱۳.۲)</SelectItem>
+                      <SelectItem value="varianceSample">واریانس نمونه (۱۳.۲)</SelectItem>
+                      <SelectItem value="stdDev">انحراف معیار (۱۳.۲)</SelectItem>
+                      <SelectItem value="stdDevSample">انحراف معیار نمونه (۱۳.۲)</SelectItem>
+                      <SelectItem value="quartile1">چارک اول (۱۳.۲)</SelectItem>
+                      <SelectItem value="quartile3">چارک سوم (۱۳.۲)</SelectItem>
+                      <SelectItem value="percentile">صدک (۱۳.۲)</SelectItem>
+                      <SelectItem value="iqr">فاصله بین چارکی (۱۳.۲)</SelectItem>
+                      <SelectItem value="cv">ضریب تغییرات (۱۳.۲)</SelectItem>
                     </SelectContent>
                   </Select>
+                  {m.agg === 'weightedAvg' && (
+                    <Select value={m.weightFieldId ?? ''} onValueChange={v => setSelMeasures(ms => ms.map((x, j) => j === i ? { ...x, weightFieldId: v || undefined } : x))}>
+                      <SelectTrigger className="h-7 text-xs w-32"><SelectValue placeholder="ستون وزن" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="—">بدون وزن</SelectItem>
+                        {measures.map(f => <SelectItem key={f.id} value={f.id}>وزن: {f.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {m.agg === 'percentile' && (
+                    <Input
+                      type="number" min={1} max={99}
+                      value={m.percentileP !== undefined ? String(Math.round(m.percentileP * 100)) : '50'}
+                      onChange={e => {
+                        const p = Math.min(99, Math.max(1, parseInt(e.target.value || '50', 10)))
+                        setSelMeasures(ms => ms.map((x, j) => j === i ? { ...x, percentileP: p / 100 } : x))
+                      }}
+                      className="h-7 w-16 text-xs" aria-label="درصد صدک"
+                    />
+                  )}
                   <Button variant="ghost" size="icon" className="size-7 shrink-0" onClick={() => setSelMeasures(ms => ms.filter((_, j) => j !== i))} aria-label="حذف سنجه">
                     <X className="size-3" />
                   </Button>
@@ -1336,6 +1386,48 @@ export default function ReportBuilder({
                 <Switch checked={showIdentity} onCheckedChange={setShowIdentity} className="scale-90" />
                 بخش فرمول و شناسنامه شاخص (۱۹.۲)
               </label>
+              {/* محاسبات پنجره‌ای — مجموع تجمعی و میانگین متحرک (بخش ۱۳.۲) */}
+              {selMeasures.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="text-muted-foreground">محاسبات سطری (۱۳.۲):</span>
+                  <Select
+                    value={winCalc?.type ?? '—'}
+                    onValueChange={v => setWinCalc(v === '—' ? null : { type: v as 'cumsum' | 'movingAvg', fieldAlias: winCalc?.fieldAlias || firstAlias, window: winCalc?.window ?? 3 })}
+                  >
+                    <SelectTrigger className="h-7 w-36 text-[11px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="—">بدون محاسبه سطری</SelectItem>
+                      <SelectItem value="cumsum">مجموع تجمعی</SelectItem>
+                      <SelectItem value="movingAvg">میانگین متحرک</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {winCalc && (
+                    <>
+                      <Select value={winCalc.fieldAlias} onValueChange={v => setWinCalc({ ...winCalc, fieldAlias: v })}>
+                        <SelectTrigger className="h-7 w-40 text-[11px]"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {selMeasures.map((m, i) => <SelectItem key={i} value={aliasOf(m)}>{aliasOf(m)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      {winCalc.type === 'movingAvg' && (
+                        <Input
+                          type="number" min={2} max={24}
+                          value={String(winCalc.window)}
+                          onChange={e => setWinCalc({ ...winCalc, window: Math.max(2, Math.min(24, parseInt(e.target.value || '3', 10))) })}
+                          className="h-7 w-14 text-[11px]" aria-label="اندازه پنجره"
+                        />
+                      )}
+                      {selDims.length === 0 ? (
+                        <span className="text-amber-600">برای محاسبه سطری، یک بُعد انتخاب کنید.</span>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          ستون «{windowAlias}» افزوده می‌شود — ترتیب: {fieldLabel(selDims[0])} (بخش ۱۳.۲ سند)
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             {showElements && (
@@ -2010,6 +2102,7 @@ export default function ReportBuilder({
                             {visibleDims.map(d => <TableHead key={d}>{fieldLabel(d)}</TableHead>)}
                             {selMeasures.map((m, i) => <TableHead key={i} className="text-left">{aliasOf(m).replace(/\s*\([^)]*\)\s*$/, '')}{unitSuffix(m)}</TableHead>)}
                             {selMeasures.length === 0 && <TableHead className="text-left">تعداد رکورد</TableHead>}
+                            {windowAlias && <TableHead className="text-left">{windowAlias}</TableHead>}
                             <TableHead className="w-20 text-center">عملیات</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -2022,6 +2115,7 @@ export default function ReportBuilder({
                                 return <TableCell key={j} className="text-left tabular-nums">{typeof r[alias] === 'number' ? fmtVal(r[alias] as number) : '—'}</TableCell>
                               })}
                               {selMeasures.length === 0 && <TableCell className="text-left tabular-nums">۱</TableCell>}
+                              {windowAlias && <TableCell className="text-left tabular-nums">{typeof r[windowAlias] === 'number' ? fmtVal(r[windowAlias] as number) : '—'}</TableCell>}
                               <TableCell>
                                 <div className="flex items-center justify-center gap-0.5">
                                   {drillable && (

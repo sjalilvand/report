@@ -30,6 +30,22 @@ interface UserRow {
 }
 interface RowRuleDTO { datasetId: string; fieldId: string; op: string; value?: string; values?: string[] }
 interface SettingsRow { settings: Record<string, string | number | boolean>; labels: Record<string, string> }
+
+// تنظیمات چندگزینه‌ای — گزینه‌های مجاز (بخش ۱۳.۲ سند: روش صدک، نوع انحراف معیار، رفتار خالی)
+const SETTING_ENUMS: Record<string, { value: string; label: string }[]> = {
+  statPercentileMethod: [
+    { value: 'linear', label: 'درون‌یابی خطی (R-7)' },
+    { value: 'nearest', label: 'نزدیک‌ترین رتبه' },
+  ],
+  statStdDevDefault: [
+    { value: 'sample', label: 'نمونه‌ای (n−۱)' },
+    { value: 'population', label: 'جامع (n)' },
+  ],
+  statNullBehavior: [
+    { value: 'exclude', label: 'کنار گذاشتن مقادیر خالی' },
+    { value: 'zero', label: 'صفر فرض کردن' },
+  ],
+}
 interface SchedulerStatus { running: boolean; intervalMinutes: number; startedAt: string | null; lastRunAt: string | null; lastRunProjects: number; lastRunEvaluated: number; lastRunCreated: number; lastEmailSent: boolean; lastConnSync?: number; lastConnSyncFailed?: number; lastError: string | null }
 interface HealthStatus { status: string; uptimeSec: number; checks: { database: { status: string }; scheduler: { running: boolean; lastRunAt: string | null }; queue: { running: number; queued: number; lastFinishedAt: string | null; lastError: string | null } } }
 interface AuditRow { id: string; action: string; detail?: string | null; actor?: string | null; createdAt: string; projectId?: string | null }
@@ -272,6 +288,21 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
                       <div key={key} className="rounded-lg border p-3 flex items-center justify-between gap-2">
                         <Label className="text-xs">{label}</Label>
                         <Switch checked={val} onCheckedChange={v => setSettings({ ...settings, settings: { ...settings.settings, [key]: v } })} />
+                      </div>
+                    )
+                  }
+                  // تنظیمات چندگزینه‌ای — گزینه‌های مجاز بخش ۱۳.۲
+                  const enumOpts = SETTING_ENUMS[key]
+                  if (enumOpts && typeof val === 'string') {
+                    return (
+                      <div key={key} className="space-y-1.5">
+                        <Label className="text-xs">{label}</Label>
+                        <Select value={val} onValueChange={v => setSettings({ ...settings, settings: { ...settings.settings, [key]: v } })}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {enumOpts.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
                       </div>
                     )
                   }

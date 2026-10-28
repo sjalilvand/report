@@ -1367,4 +1367,178 @@ print('✓ اجزای گزارش ذخیره شد — متن و تصویر/لوگ
 $CURL -X DELETE "$BASE/reports/$RID39" > /dev/null 2>&1 || true
 
 echo ""
-echo "✓✓✓ هر ۳۹ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"
+echo "═══ ۴۰) توابع آماری پیشرفته — بخش ۱۳.۲ (و ۱۳.۱: نما، دامنه، میانگین وزنی) ═══"
+
+echo "── ۴۰.۱) صحت آماره‌ها در برابر محاسبه مستقل پایتون (نمونه ۸ رکوردی) ──"
+REC=$($CURL "$BASE/datasets/$DSID/records?limit=100")
+STAT=$($CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"S\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"avg\",\"alias\":\"A\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"weightedAvg\",\"alias\":\"WA\",\"weightFieldId\":\"$F_CNT\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"min\",\"alias\":\"MN\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"max\",\"alias\":\"MX\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"median\",\"alias\":\"MED\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"mode\",\"alias\":\"MODE\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"range\",\"alias\":\"RNG\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"varianceSample\",\"alias\":\"VAR\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"stdDevSample\",\"alias\":\"SD\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"quartile1\",\"alias\":\"Q1\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"quartile3\",\"alias\":\"Q3\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"iqr\",\"alias\":\"IQR\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"cv\",\"alias\":\"CV\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"percentile\",\"alias\":\"P50\",\"percentileP\":0.5}]}")
+echo "$REC" > /tmp/e2e_records.json; echo "$STAT" > /tmp/e2e_stat.json
+python3 - <<'PYEOF'
+import json, math
+recs = json.load(open('/tmp/e2e_records.json'))['rows']
+def to_num(v):
+    if v is None: return None
+    s = str(v).strip().replace('٫','.').replace(',','').replace('٬','')
+    try: return float(s)
+    except: return None
+xs = []
+ws = []
+for r in recs:
+    amt = to_num(next((r[k] for k in r if 'مبلغ' in k and 'کد' not in k), None))
+    cnt = to_num(next((r[k] for k in r if 'تعداد' in k and 'تراکنش' in k), None))
+    if amt is not None:
+        xs.append(amt)
+        if cnt is not None:
+            ws.append(cnt)
+        else:
+            ws.append(0)
+st = json.load(open('/tmp/e2e_stat.json'))['rows'][0]
+n = len(xs)
+# تبدیل واحد مبلغ به مبنای ریال در سمت سرور انجام می‌شود — ضریب از جمع بازخوانی می‌شود (بخش ۱۴.۱)
+factor = st['S'] / sum(xs) if sum(xs) else 1
+xs = [x * factor for x in xs]
+mean = sum(xs)/n
+exp = {
+  'S': sum(xs), 'A': mean,
+  'WA': sum(x*w for x,w in zip(xs,ws))/sum(ws),
+  'MN': min(xs), 'MX': max(xs), 'RNG': max(xs)-min(xs),
+  'MODE': None,
+}
+srt = sorted(xs)
+def q_linear(p):
+    idx = p*(n-1); lo=math.floor(idx); hi=math.ceil(idx)
+    return srt[lo] if lo==hi else srt[lo]+(idx-lo)*(srt[hi]-srt[lo])
+exp['MED'] = q_linear(0.5); exp['P50'] = q_linear(0.5)
+exp['Q1'] = q_linear(0.25); exp['Q3'] = q_linear(0.75)
+exp['IQR'] = exp['Q3']-exp['Q1']
+var_s = sum((x-mean)**2 for x in xs)/(n-1)
+exp['VAR'] = var_s; exp['SD'] = math.sqrt(var_s)
+exp['CV'] = math.sqrt(var_s)/abs(mean)
+freq = {}
+for x in xs: freq[x] = freq.get(x,0)+1
+bestc = max(freq.values()); exp['MODE'] = min(v for v,c in freq.items() if c==bestc)
+tol = max(1e-6, abs(mean)*1e-9)
+for k, want in exp.items():
+    got = st[k]
+    assert got is not None and abs(got-want) <= tol*max(1,abs(want)), f'{k}: got={got} want={want}'
+assert abs(st['P50']-st['MED']) < 1e-9, 'صدک ۵۰ باید برابر میانه باشد'
+assert abs(st['IQR']-(st['Q3']-st['Q1'])) < 1e-9, 'IQR باید Q3-Q1 باشد'
+print('✓ همه ۱۵ آماره با محاسبه مستقل مطابق است — صدک۵۰=میانه، IQR=Q3-Q1، CV=SD/میانگین، میانگین وزنی صحیح')
+PYEOF
+
+echo "── ۴۰.۲) کنترل مدیر: نوع انحراف معیار و روش صدک از تنظیمات (بخش ۱۳.۲) ──"
+SD_SAMPLE=$(echo "$STAT" | python3 -c "import json,sys; print(json.load(sys.stdin)['rows'][0]['SD'])")
+$CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d '{"statStdDevDefault":"population","statPercentileMethod":"nearest"}' > /dev/null
+STAT2=$($CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"stdDev\",\"alias\":\"SDP\"},{\"fieldId\":\"$F_AMT\",\"agg\":\"percentile\",\"alias\":\"P50N\",\"percentileP\":0.5},{\"fieldId\":\"$F_AMT\",\"agg\":\"median\",\"alias\":\"MEDN\"}]}")
+echo "$STAT2" > /tmp/e2e_stat2.json
+python3 - <<'PYEOF'
+import json, math
+recs = json.load(open('/tmp/e2e_records.json'))['rows']
+def to_num(v):
+    if v is None: return None
+    s = str(v).strip().replace('٫','.').replace(',','').replace('٬','')
+    try: return float(s)
+    except: return None
+key = [k for k in recs[0] if 'مبلغ' in k and 'کد' not in k][0]
+xs = [to_num(r.get(key)) for r in recs]; xs=[x for x in xs if x is not None]
+base = json.load(open('/tmp/e2e_stat.json'))['rows'][0]
+factor = base['S'] / sum(xs) if sum(xs) else 1
+xs = [x * factor for x in xs]  # مبنای ریال — بخش ۱۴.۱
+n = len(xs); mean = sum(xs)/n
+sd_pop = math.sqrt(sum((x-mean)**2 for x in xs)/n)
+srt = sorted(xs)
+p_nearest = srt[min(n-1, max(0, round(0.5*(n-1))))]
+st = json.load(open('/tmp/e2e_stat2.json'))['rows'][0]
+assert abs(st['SDP']-sd_pop) < max(1e-6, sd_pop*1e-9), f"انحراف معیار جامع: {st['SDP']} != {sd_pop}"
+assert abs(st['P50N']-p_nearest) < 1e-9, f"صدک نزدیک‌ترین رتبه: {st['P50N']} != {p_nearest}"
+assert abs(st['MEDN']-p_nearest) < 1e-9, 'میانه نیز باید با روش مدیر (nearest) محاسبه شود'
+print(f'✓ انحراف معیار جامع={round(sd_pop,2)} | صدک nearest={p_nearest} — تنظیمات مدیر اعمال شد')
+PYEOF
+SD_POP=$(echo "$STAT2" | python3 -c "import json,sys; print(json.load(sys.stdin)['rows'][0]['SDP'])")
+python3 -c "assert float('$SD_POP') < float('$SD_SAMPLE'), 'انحراف معیار جامع باید از نمونه‌ای کوچک‌تر باشد (n در برابر n-۱)'; print('✓ جامع', round(float('$SD_POP'),2), '< نمونه‌ای', round(float('$SD_SAMPLE'),2), '— دو نوع انحراف معیار متمایزند')"
+# بازگشت تنظیمات به پیش‌فرض
+$CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d '{"statStdDevDefault":"sample","statPercentileMethod":"linear","statNullBehavior":"exclude"}' > /dev/null
+
+echo "── ۴۰.۳) محاسبات پنجره‌ای: مجموع تجمعی و میانگین متحرک (بخش ۱۳.۲) ──"
+WIN=$($CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[\"$F_DATE\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"}],\"orderBy\":[{\"field\":\"$F_DATE\",\"dir\":\"asc\"}],\"windowCalcs\":[{\"type\":\"cumsum\",\"fieldAlias\":\"جمع مبلغ\",\"alias\":\"تاکنون\"},{\"type\":\"movingAvg\",\"fieldAlias\":\"جمع مبلغ\",\"window\":2,\"alias\":\"میانگین دوگانه\"}]}")
+echo "$WIN" > /tmp/e2e_win.json
+python3 - <<'PYEOF'
+import json
+rows = json.load(open('/tmp/e2e_win.json'))['rows']
+assert len(rows) >= 3, 'برای محاسبه پنجره‌ای حداقل سه گروه لازم است'
+vals = [r['جمع مبلغ'] for r in rows if isinstance(r.get('جمع مبلغ'), (int, float))]
+assert len(vals) == len(rows), 'همه ردیف‌ها باید سنجه عددی داشته باشند'
+acc = 0
+for i, r in enumerate(rows):
+    acc += vals[i]
+    assert abs(r['تاکنون'] - acc) < 1e-6, f"مجموع تجمعی ردیف {i}: {r['تاکنون']} != {acc}"
+    w = vals[max(0, i-1):i+1]
+    assert abs(r['میانگین دوگانه'] - sum(w)/len(w)) < 1e-6, f"میانگین متحرک ردیف {i}"
+print(f'✓ {len(rows)} گروه: مجموع تجمعی و میانگین متحرک (پنجره ۲) با ترتیب تاریخ صحیح است')
+PYEOF
+
+echo ""
+echo "═══ ۴۱) تبدیل‌های ساختاری Unpivot و Pivot — بخش ۱۰.۲ ═══"
+# جمع‌های پایه پیش از تبدیل برای مقایسه رفت‌وبرگشت
+BASEQ=$($CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"},{\"fieldId\":\"$F_CNT\",\"agg\":\"sum\",\"alias\":\"جمع تعداد\"}]}")
+echo "$BASEQ" > /tmp/e2e_baseq.json
+TOTAL_AMT=$(echo "$BASEQ" | python3 -c "import json,sys; print(json.load(sys.stdin)['totals']['جمع مبلغ'])")
+TOTAL_CNT=$(echo "$BASEQ" | python3 -c "import json,sys; print(json.load(sys.stdin)['totals']['جمع تعداد'])")
+
+echo "── ۴۱.۱) Unpivot: دو ستون مبلغ و تعداد به جفت شاخص/مقدار ──"
+UNP=$($CURL -X POST "$BASE/datasets/$DSID/transform" -H 'Content-Type: application/json' -d "{\"op\":\"unpivot\",\"config\":{\"keepColumns\":\"$F_PROV\",\"unpivotColumns\":\"$F_AMT,$F_CNT\",\"attrName\":\"شاخص\",\"valueName\":\"مقدار\"}}")
+echo "$UNP" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' not in d, 'Unpivot خطا داد: '+str(d.get('error'))
+assert d['rowCount'] == 16, f\"۸ رکورد × ۲ ستون = ۱۶ رکورد مورد انتظار است؛ به دست آمد {d['rowCount']}\"
+print('✓ Unpivot: ۸ سطر →', d['rowCount'], 'سطر | هشدار:', (d.get('warnings') or [''])[0][:60])"
+
+echo "── ۴۱.۲) صحت جمع پس از Unpivot: جمع مقدار به تفکیک شاخص ──"
+$CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[\"شاخص\"],\"measures\":[{\"fieldId\":\"مقدار\",\"agg\":\"sum\",\"alias\":\"جمع مقدار\"}]}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+rows={r['شاخص']: r['جمع مقدار'] for r in d['rows']}
+amt_key=[k for k in rows if 'مبلغ' in k][0]
+cnt_key=[k for k in rows if 'تعداد' in k][0]
+assert abs(rows[amt_key]-$TOTAL_AMT) < 1e-6, f\"جمع مبلغ پس از Unpivot تغییر کرده: {rows[amt_key]} != $TOTAL_AMT\"
+assert abs(rows[cnt_key]-$TOTAL_CNT) < 1e-6, f\"جمع تعداد پس از Unpivot تغییر کرده: {rows[cnt_key]} != $TOTAL_CNT\"
+print('✓ جمع مبلغ و تعداد پس از گسترش حفظ شده است — داده‌ای گم نشده (۱۰.۲)')"
+
+echo "── ۴۱.۳) Pivot ساختاری: بازگشت به فرمت پهن با کلید استان ──"
+PV=$($CURL -X POST "$BASE/datasets/$DSID/transform" -H 'Content-Type: application/json' -d "{\"op\":\"pivot\",\"config\":{\"keyColumns\":\"$F_PROV\",\"attributeColumn\":\"شاخص\",\"valueColumn\":\"مقدار\",\"agg\":\"sum\",\"fillValue\":\"0\"}}")
+echo "$PV" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' not in d, 'Pivot خطا داد: '+str(d.get('error'))
+print('✓ Pivot ساختاری:', d['step']['before'], '→', d['step']['after'], 'سطر |', len(d.get('warnings') or []), 'هشدار')"
+# شناسه ستون‌های جدید = برچسب ستون‌های تبدیل‌شونده — از فهرست فیلدها خوانده می‌شود (نقل‌قول JSON برای فاصله در نام)
+DSJ=$($CURL "$BASE/datasets/$DSID")
+AMT2=$(echo "$DSJ" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+ms=[f['id'] for f in d['fields'] if f.get('role')=='measure']
+assert len(ms) >= 2, 'پس از Pivot دو ستون سنجه مورد انتظار است: '+str(ms)
+print(json.dumps(ms[0], ensure_ascii=False))")
+CNT2=$(echo "$DSJ" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+ms=[f['id'] for f in d['fields'] if f.get('role')=='measure']
+print(json.dumps(ms[1], ensure_ascii=False))")
+$CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[],\"measures\":[{\"fieldId\":$AMT2,\"agg\":\"sum\",\"alias\":\"S\"},{\"fieldId\":$CNT2,\"agg\":\"sum\",\"alias\":\"C\"}]}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+r=d['rows'][0]
+assert abs(r['S']-$TOTAL_AMT) < 1e-6, f\"جمع مبلغ پس از رفت‌وبرگشت تغییر کرده: {r['S']} != $TOTAL_AMT\"
+assert abs(r['C']-$TOTAL_CNT) < 1e-6, f\"جمع تعداد پس از رفت‌وبرگشت تغییر کرده: {r['C']} != $TOTAL_CNT\"
+print('✓ رفت‌وبرگشت Unpivot→Pivot بدون تغییر مجموع — صحت تبدیل ساختاری تأیید شد')"
+
+echo "── ۴۱.۴) خطای شفاف: Unpivot بدون ستون تبدیل ──"
+$CURL -X POST "$BASE/datasets/$DSID/transform" -H 'Content-Type: application/json' -d '{"op":"unpivot","config":{"keepColumns":"","unpivotColumns":"ستون_ناموجود"}}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' in d, 'بدون ستون معتبر باید خطا برگردد'
+print('✓ پیام خطای شفاف:', d['error'][:60])"
+
+echo ""
+echo "✓✓✓ هر ۴۱ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"

@@ -3,6 +3,16 @@
 
 import { DataRow, TransformStep, FieldMeta } from './types'
 import { toLatinDigits, toPersianDigits } from './digits'
+import { getUnit, isCurrencyUnit } from './currency'
+
+// تحلیل عدد از مقدار خام — پشتیبانی ممیز فارسی و جداکننده
+function parseNumLoose(v: unknown): number | null {
+  if (v === null || v === undefined) return null
+  const s = toLatinDigits(String(v)).replace(/[٫,\u060C\s]/g, m => m === '٫' ? '.' : '')
+  if (s === '' || s === '.') return null
+  const n = parseFloat(s)
+  return Number.isFinite(n) ? n : null
+}
 
 export interface TransformOpDef {
   op: string
@@ -60,6 +70,20 @@ export const TRANSFORM_OPS: TransformOpDef[] = [
   { op: 'addSourceColumn', label: 'افزودن ستون منشأ فایل و شیت', category: 'structural', description: 'ثبت منشأ داده برای ردیابی (بخش ۱۰.۲ و ۴)', params: [
     { key: 'fileName', label: 'نام فایل', type: 'text' },
     { key: 'sheetName', label: 'نام شیت', type: 'text' },
+  ] },
+  { op: 'unpivot', label: 'تبدیل ستون‌ها به سطر (Unpivot)', category: 'structural', description: 'گسترش ستون‌های انتخابی به جفت «شاخص/مقدار» — فرمت پهن به بلند (بخش ۱۰.۲)', params: [
+    { key: 'keepColumns', label: 'ستون‌های ثابت (با کاما)', type: 'text' },
+    { key: 'unpivotColumns', label: 'ستون‌های تبدیل‌شونده (با کاما)', type: 'text' },
+    { key: 'attrName', label: 'نام ستون شاخص', type: 'text' },
+    { key: 'valueName', label: 'نام ستون مقدار', type: 'text' },
+  ] },
+  { op: 'pivot', label: 'تبدیل سطرها به ستون (Pivot ساختاری)', category: 'structural', description: 'تبدیل مقادیر یک ستون به ستون‌های جدید با تجمیع — فرمت بلند به پهن (بخش ۱۰.۲)', params: [
+    { key: 'keyColumns', label: 'ستون‌های کلید گروه‌بندی (با کاما)', type: 'text' },
+    { key: 'attributeColumn', label: 'ستونی که مقادیرش ستون می‌شوند', type: 'text' },
+    { key: 'valueColumn', label: 'ستون مقدار', type: 'text' },
+    { key: 'agg', label: 'تجمیع', type: 'select', options: ['sum', 'avg', 'count', 'min', 'max', 'first'] },
+    { key: 'fillValue', label: 'مقدار پرکننده خانه‌های خالی (اختیاری)', type: 'text' },
+    { key: 'colLimit', label: 'حداکثر ستون خروجی', type: 'number' },
   ] },
 ]
 
@@ -244,6 +268,142 @@ export function applyTransform(
       const name = 'منشأ'
       out = records.map(r => ({ ...r, [name]: `${config.fileName ?? ''} / ${config.sheetName ?? ''}` }))
       outFields = [...fields, { ...fields[0], id: name, sourceName: name, label: 'منشأ فایل و شیت', type: 'text', role: 'attribute', aggregation: 'count', description: 'ستون منشأ داده — بخش ۱۰.۲ سند' }]
+      break
+    }
+    // تبدیل ستون‌ها به سطر (Unpivot) — بخش ۱۰.۲: فرمت پهن به بلند
+    case 'unpivot': {
+      const keepCols = String(config.keepColumns ?? '').split(',').map(s => s.trim()).filter(Boolean)
+      const unpivotCols = String(config.unpivotColumns ?? '').split(',').map(s => s.trim()).filter(c => c && fields.some(f => f.id === c))
+      if (unpivotCols.length === 0) { errors.push('حداقل یک ستون معتبر برای تبدیل به سطر لازم است (بخش ۱۰.۲ سند).'); break }
+      const unknownKeep = keepCols.filter(c => !fields.some(f => f.id === c))
+      if (unknownKeep.length > 0) warnings.push(`ستون‌های ثابت ناشناخته نادیده گرفته شد: ${unknownKeep.join('، ')}`)
+      const attrName = String(config.attrName ?? '').trim() || 'شاخص'
+      const valueName = String(config.valueName ?? '').trim() || 'مقدار'
+      const effKeep = keepCols.filter(c => fields.some(f => f.id === c) && !unpivotCols.includes(c))
+      const rows: DataRow[] = []
+      // مبلغ‌های ارزی هنگام گسترش به مبنای ریال نرمال می‌شوند تا جمع پس از Unpivot حفظ شود — بخش ۱۴.۱
+      const currencyFactor = new Map<string, number>()
+      for (const c of unpivotCols) {
+        const fm = fields.find(f => f.id === c)
+        currencyFactor.set(c, fm?.type === 'amount' && fm.unit && isCurrencyUnit(fm.unit) ? getUnit(fm.unit).factor : 1)
+      }
+      for (const r of records) {
+        for (const c of unpivotCols) {
+          const row: DataRow = {}
+          for (const k of effKeep) row[k] = r[k] ?? null
+          row[attrName] = fields.find(f => f.id === c)?.label ?? c
+          const rawV = r[c]
+          const fnum = parseNumLoose(rawV)
+          row[valueName] = rawV === null || rawV === undefined
+            ? null
+            : (fnum !== null ? fnum * (currencyFactor.get(c) ?? 1) : rawV)
+          rows.push(row)
+        }
+      }
+      out = rows
+      const keptFields = fields.filter(f => effKeep.includes(f.id))
+      const attrField: FieldMeta = { ...fields[0], id: attrName, sourceName: attrName, label: attrName, type: 'text', role: 'dimension', aggregation: 'count', description: 'ستون شاخص پس از Unpivot — بخش ۱۰.۲ سند' }
+      const allNumeric = unpivotCols.every(c => ['integer', 'decimal', 'amount', 'percent'].includes(fields.find(x => x.id === c)?.type ?? ''))
+      const allCurrency = unpivotCols.length > 0 && unpivotCols.every(c => {
+        const fm = fields.find(x => x.id === c)
+        return fm?.type === 'amount' && fm.unit && isCurrencyUnit(fm.unit)
+      })
+      const valField: FieldMeta = {
+        ...fields[0], id: valueName, sourceName: valueName, label: valueName,
+        type: allNumeric ? 'decimal' : 'text',
+        role: allNumeric ? 'measure' : 'attribute',
+        aggregation: allNumeric ? 'sum' : 'count',
+        unit: allCurrency ? 'ریال' : undefined, // همه ستون‌ها ارزی‌اند → مقادیر اکنون مبنای ریال‌اند
+        description: 'ستون مقدار پس از Unpivot — بخش ۱۰.۲ سند',
+      }
+      outFields = [...keptFields, attrField, valField]
+      warnings.push(`${records.length} سطر به ${rows.length} سطر گسترش یافت (${unpivotCols.length} ستون تبدیل شد — بخش ۱۰.۲ سند).`)
+      break
+    }
+    // تبدیل سطرها به ستون (Pivot ساختاری) — بخش ۱۰.۲: فرمت بلند به پهن
+    case 'pivot': {
+      const keyCols = String(config.keyColumns ?? '').split(',').map(s => s.trim()).filter(c => c && fields.some(f => f.id === c))
+      const attrCol = String(config.attributeColumn ?? '').trim()
+      const valCol = String(config.valueColumn ?? '').trim()
+      if (keyCols.length === 0 || !attrCol || !valCol) {
+        errors.push('ستون کلید، ستون شاخص و ستون مقدار همه الزامی‌اند (بخش ۱۰.۲ سند).')
+        break
+      }
+      if (!fields.some(f => f.id === attrCol) || !fields.some(f => f.id === valCol)) {
+        errors.push('ستون شاخص یا ستون مقدار یافت نشد.')
+        break
+      }
+      const agg = String(config.agg ?? 'sum')
+      const rawFill = String(config.fillValue ?? '').trim()
+      const fillValue = rawFill === '' ? null : (Number.isFinite(parseFloat(rawFill)) ? parseFloat(rawFill) : rawFill)
+      const colLimit = Math.max(1, Math.min(100, Math.floor(Number(config.colLimit ?? 30))))
+      // مقادیر متمایز ستون شاخص به ترتیب اولین وقوع
+      const colKeys: string[] = []
+      for (const r of records) {
+        const k = r[attrCol] === null || r[attrCol] === undefined || String(r[attrCol]).trim() === '' ? '—' : String(r[attrCol])
+        if (!colKeys.includes(k)) colKeys.push(k)
+      }
+      let truncated = false
+      if (colKeys.length > colLimit) { colKeys.length = colLimit; truncated = true }
+      // گروه‌بندی بر اساس کلیدها
+      const groups = new Map<string, DataRow[]>()
+      const keyOrder: string[] = []
+      for (const r of records) {
+        const key = keyCols.map(c => String(r[c] ?? '')).join('§')
+        if (!groups.has(key)) keyOrder.push(key)
+        const arr = groups.get(key)
+        if (arr) arr.push(r)
+        else groups.set(key, [r])
+      }
+      // مقدار عددی یا متنی؟
+      const valIsNumeric = ['integer', 'decimal', 'amount', 'percent'].includes(fields.find(x => x.id === valCol)?.type ?? '')
+      const rows: DataRow[] = []
+      for (const key of keyOrder) {
+        const recs = groups.get(key) ?? []
+        const row: DataRow = {}
+        keyCols.forEach((c, i) => { row[c] = key.split('§')[i] })
+        for (const ck of colKeys) {
+          const subset = recs.filter(r => (r[attrCol] === null || r[attrCol] === undefined || String(r[attrCol]).trim() === '' ? '—' : String(r[attrCol])) === ck)
+          let v: number | string | null
+          if (subset.length === 0) {
+            v = fillValue
+          } else if (agg === 'count') {
+            v = subset.length
+          } else if (!valIsNumeric && agg !== 'first') {
+            v = null // تجمیع عددی روی مقدار غیرعددی تعریف‌نشده است
+          } else {
+            const nums = subset.map(r => parseFloat(String(r[valCol] ?? '').replace(/[٫,\u060C\s]/g, m => m === '٫' ? '.' : ''))).filter(Number.isFinite)
+            switch (agg) {
+              case 'sum': v = nums.length ? nums.reduce((a, b) => a + b, 0) : (fillValue ?? 0); break
+              case 'avg': v = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : (fillValue ?? 0); break
+              case 'min': v = nums.length ? Math.min(...nums) : (fillValue ?? 0); break
+              case 'max': v = nums.length ? Math.max(...nums) : (fillValue ?? 0); break
+              case 'first': default: {
+                const fv = subset[0][valCol]
+                v = fv === null || fv === undefined ? fillValue : (typeof fv === 'number' || typeof fv === 'string' ? fv : String(fv))
+                break
+              }
+            }
+          }
+          row[ck] = v
+        }
+        rows.push(row)
+      }
+      out = rows
+      const keptFields = fields.filter(f => keyCols.includes(f.id))
+      const valFieldMeta = fields.find(x => x.id === valCol)
+      const newCols: FieldMeta[] = colKeys.map(ck => ({
+        ...fields[0],
+        id: ck, sourceName: ck, label: ck,
+        type: agg === 'count' || (valIsNumeric && agg !== 'first') ? 'decimal' : 'text',
+        role: agg === 'count' || (valIsNumeric && agg !== 'first') ? 'measure' : 'attribute',
+        aggregation: agg === 'count' || (valIsNumeric && agg !== 'first') ? 'sum' : 'count',
+        unit: agg === 'count' ? undefined : valFieldMeta?.unit,
+        description: `ستون حاصل از Pivot مقدار «${ck}» — بخش ۱۰.۲ سند`,
+      }))
+      outFields = [...keptFields, ...newCols]
+      if (truncated) warnings.push(`تعداد مقادیر متمایز ستون شاخص بیش از حد مجاز بود؛ ${colLimit} ستون نخست ساخته شد (بخش ۱۰.۲ سند).`)
+      warnings.push(`${records.length} سطر به ${rows.length} سطر با ${colKeys.length} ستون جدید فشرده شد (تجمیع: ${agg} — بخش ۱۰.۲ سند).`)
       break
     }
     default:

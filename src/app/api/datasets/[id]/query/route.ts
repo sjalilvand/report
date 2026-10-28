@@ -6,7 +6,8 @@ import { ok, fail, parseJson } from '@/lib/server'
 import { runQuery, buildDescriptiveReport } from '@/lib/query'
 import { requireUser, errorResponse, applyRowRules, maskRecords, maskFieldsMeta, RowRule } from '@/lib/auth'
 import { resolveRelationFilters, RelationFilter } from '@/lib/relfilter'
-import { FieldMeta, DataRow, QuerySpec } from '@/lib/types'
+import { FieldMeta, DataRow, QuerySpec, StatOptions } from '@/lib/types'
+import { getSettings } from '@/lib/settings'
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params
@@ -26,7 +27,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       orderBy: body.orderBy,
       limit: body.limit,
       searchText: body.searchText,
+      windowCalcs: Array.isArray(body.windowCalcs) ? body.windowCalcs : undefined,
     }
+
+    // گزینه‌های آماری از تنظیمات مدیر — بخش ۱۳.۲ (روش صدک، نوع انحراف معیار، رفتار خالی)
+    const settings = await getSettings()
+    const statOptions: StatOptions = {
+      percentileMethod: settings.statPercentileMethod === 'nearest' ? 'nearest' : 'linear',
+      stdDevType: settings.statStdDevDefault === 'population' ? 'population' : 'sample',
+      nullBehavior: settings.statNullBehavior === 'zero' ? 'zero' : 'exclude',
+    }
+    spec.statOptions = statOptions
 
     // فیلتر وابسته از روابط جداول — بخش ۱۹.۳ سند (تبدیل شبه‌اجرا به فیلتر کلید اتصال)
     const relationFilters: RelationFilter[] = Array.isArray(body.relationFilters) ? body.relationFilters : []

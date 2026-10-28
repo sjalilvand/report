@@ -47,6 +47,10 @@ export interface PlatformSettings {
   aiEnabled: boolean           // فعال‌بودن دستیار هوشمند (پرسش به زبان طبیعی، توضیح فرمول، روایت‌سازی)
   aiAllowDataSharing: boolean  // مجوز ارسال نمونه داده به سرویس مدل زبانی بیرونی (الزام بخش ۲۵)
   aiMaxRowsShared: number      // سقف ردیف‌های نمونه قابل ارسال به سرویس بیرونی
+  // گزینه‌های آماری محاسبات — بخش ۱۳.۲ سند (کنترل مدیر)
+  statPercentileMethod: string // روش صدک/چارک: linear (درون‌یابی خطی R-7) یا nearest (نزدیک‌ترین رتبه)
+  statStdDevDefault: string    // نوع پیش‌فرض انحراف معیار و واریانس: sample (n−۱) یا population (n)
+  statNullBehavior: string     // رفتار داده خالی در محاسبات آماری: exclude یا zero
 }
 
 // اهداف پیشنهادی اولیه سند — مشروط به آزمون با داده واقعی سازمان (بخش ۳۰.۱ و ۳۷)
@@ -88,6 +92,9 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   aiEnabled: true,
   aiAllowDataSharing: false,
   aiMaxRowsShared: 100,
+  statPercentileMethod: 'linear',
+  statStdDevDefault: 'sample',
+  statNullBehavior: 'exclude',
 }
 
 export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
@@ -128,6 +135,9 @@ export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
   aiEnabled: 'دستیار هوشمند و هوش مصنوعی (بخش ۲۵)',
   aiAllowDataSharing: 'مجوز ارسال نمونه داده به سرویس مدل زبانی بیرونی',
   aiMaxRowsShared: 'سقف ردیف‌های قابل ارسال به سرویس بیرونی',
+  statPercentileMethod: 'روش صدک و چارک (بخش ۱۳.۲)',
+  statStdDevDefault: 'نوع پیش‌فرض انحراف معیار و واریانس (بخش ۱۳.۲)',
+  statNullBehavior: 'رفتار داده‌های خالی در محاسبات آماری (بخش ۱۳.۲)',
 }
 
 // فیلدهایی که در پاسخ GET ماسک می‌شوند — جلوگیری از نشت گذرواژه (بخش ۲۹)

@@ -40,6 +40,7 @@ const OP_LABEL: Record<string, string> = {
   mapValues: 'نگاشت مقادیر به مقدار مرجع', splitColumn: 'تقسیم ستون', mergeColumns: 'ادغام ستون‌ها',
   dropColumns: 'حذف ستون‌ها', keepColumns: 'نگهداری ستون‌ها', filterRows: 'فیلتر سطرها', sortRows: 'مرتب‌سازی',
   dedupe: 'حذف تکرار', fillNull: 'پرکردن مقدار خالی', addSourceColumn: 'افزودن ستون منشأ',
+  unpivot: 'تبدیل ستون‌ها به سطر (Unpivot)', pivot: 'تبدیل سطرها به ستون (Pivot ساختاری)',
 }
 
 export default function CleaningView({
@@ -67,6 +68,16 @@ export default function CleaningView({
   const [filterValue, setFilterValue] = useState('')
   const [keep, setKeep] = useState('first')
   const [fillMethod, setFillMethod] = useState('value')
+  // Unpivot/Pivot ساختاری — بخش ۱۰.۲
+  const [unpKeep, setUnpKeep] = useState('')
+  const [unpCols, setUnpCols] = useState('')
+  const [unpAttrName, setUnpAttrName] = useState('شاخص')
+  const [unpValueName, setUnpValueName] = useState('مقدار')
+  const [pvKeys, setPvKeys] = useState('')
+  const [pvAttr, setPvAttr] = useState('')
+  const [pvValue, setPvValue] = useState('')
+  const [pvAgg, setPvAgg] = useState('sum')
+  const [pvFill, setPvFill] = useState('')
   const [running, setRunning] = useState(false)
   const { toast } = useToast()
 
@@ -131,6 +142,19 @@ export default function CleaningView({
       case 'addSourceColumn':
         config.fileName = fileName; config.sheetName = sheetName
         break
+      case 'unpivot':
+        config.keepColumns = unpKeep
+        config.unpivotColumns = unpCols
+        config.attrName = unpAttrName || 'شاخص'
+        config.valueName = unpValueName || 'مقدار'
+        break
+      case 'pivot':
+        config.keyColumns = pvKeys
+        config.attributeColumn = pvAttr
+        config.valueColumn = pvValue
+        config.agg = pvAgg
+        config.fillValue = pvFill
+        break
     }
     apply(op, config)
   }
@@ -185,7 +209,7 @@ export default function CleaningView({
             </TabsContent>
 
             <TabsContent value="structural" className="space-y-3 pt-2">
-              <OpSelect value={op} onChange={setOp} ops={['dropColumns', 'keepColumns', 'filterRows', 'sortRows', 'dedupe', 'fillNull', 'addSourceColumn']} />
+              <OpSelect value={op} onChange={setOp} ops={['dropColumns', 'keepColumns', 'filterRows', 'sortRows', 'dedupe', 'fillNull', 'unpivot', 'pivot', 'addSourceColumn']} />
               {needsColumn(op) && op !== 'addSourceColumn' && (
                 <ColPicker
                   label={op === 'dropColumns' || op === 'keepColumns' || op === 'dedupe' ? 'ستون‌ها (چندتایی مجاز؛ خالی برای همه)' : 'ستون'}
@@ -232,6 +256,41 @@ export default function CleaningView({
                       <SelectItem value="last">نگهداری آخرین رکورد</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+              )}
+              {/* Unpivot — بخش ۱۰.۲: گسترش ستون‌ها به جفت شاخص/مقدار */}
+              {op === 'unpivot' && (
+                <div className="space-y-3">
+                  <MultiColPicker label="ستون‌های ثابت (تکرار می‌شوند)" cols={allCols} value={unpKeep} onChange={setUnpKeep} placeholder="ستون‌هایی مانند استان و تاریخ که برای هر سطر جدید تکرار می‌شوند" />
+                  <MultiColPicker label="ستون‌های تبدیل‌شونده به سطر" cols={numericCols.length > 0 ? numericCols : allCols} value={unpCols} onChange={setUnpCols} placeholder="هر ستون انتخابی به چند سطر تبدیل می‌شود" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1"><Label className="text-xs">نام ستون شاخص</Label><Input className="h-8" value={unpAttrName} onChange={e => setUnpAttrName(e.target.value)} /></div>
+                    <div className="space-y-1"><Label className="text-xs">نام ستون مقدار</Label><Input className="h-8" value={unpValueName} onChange={e => setUnpValueName(e.target.value)} /></div>
+                  </div>
+                </div>
+              )}
+              {/* Pivot ساختاری — بخش ۱۰.۲: فشرده‌سازی سطرها به ستون */}
+              {op === 'pivot' && (
+                <div className="space-y-3">
+                  <MultiColPicker label="ستون‌های کلید گروه‌بندی" cols={allCols} value={pvKeys} onChange={setPvKeys} placeholder="هر ترکیب یکتای کلیدها یک سطر خروجی است" />
+                  <ColPicker label="ستونی که مقادیرش ستون می‌شوند" cols={allCols} value={pvAttr} onChange={setPvAttr} />
+                  <ColPicker label="ستون مقدار" cols={numericCols.length > 0 ? numericCols : allCols} value={pvValue} onChange={setPvValue} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">تجمیع</Label>
+                      <Select value={pvAgg} onValueChange={setPvAgg}>
+                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {(['sum', 'avg', 'count', 'min', 'max', 'first'] as const).map(a => (
+                            <SelectItem key={a} value={a}>
+                              {({ sum: 'جمع', avg: 'میانگین', count: 'تعداد', min: 'کمینه', max: 'بیشینه', first: 'نخستین مقدار' } as Record<string, string>)[a]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1"><Label className="text-xs">پرکننده خانه خالی (اختیاری)</Label><Input className="h-8" value={pvFill} onChange={e => setPvFill(e.target.value)} placeholder="۰" /></div>
+                  </div>
                 </div>
               )}
             </TabsContent>
@@ -311,6 +370,40 @@ export default function CleaningView({
 function needsColumn(op: string): boolean {
   return ['trim', 'collapseSpaces', 'unifyPersian', 'toLatinDigits', 'toPersianDigits', 'replace', 'mapValues',
     'splitColumn', 'mergeColumns', 'dropColumns', 'keepColumns', 'filterRows', 'sortRows', 'dedupe', 'fillNull'].includes(op)
+}
+
+// انتخاب چندستونی برای Unpivot/Pivot — بخش ۱۰.۲
+function MultiColPicker({ label, cols, value, onChange, placeholder }: {
+  label: string
+  cols: { id: string; label: string }[]
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
+  const toggle = (id: string) => {
+    const arr = value ? value.split(',').map(s => s.trim()).filter(Boolean) : []
+    const idx = arr.indexOf(id)
+    if (idx >= 0) arr.splice(idx, 1)
+    else arr.push(id)
+    onChange(arr.join(','))
+  }
+  const selected = value ? value.split(',').map(s => s.trim()).filter(Boolean) : []
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      <div className="flex flex-wrap gap-1 max-h-24 overflow-auto rounded border p-1.5">
+        {cols.map(c => (
+          <button
+            key={c.id} type="button" onClick={() => toggle(c.id)}
+            className={`rounded px-1.5 py-0.5 text-[11px] border ${selected.includes(c.id) ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-background hover:bg-muted'}`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+      {placeholder && <p className="text-[10px] text-muted-foreground">{placeholder}</p>}
+    </div>
+  )
 }
 
 function OpSelect({ value, onChange, ops }: { value: string; onChange: (v: string) => void; ops: string[] }) {

@@ -24,11 +24,23 @@ export type AggregationType =
   | 'count'         // تعداد رکورد
   | 'countDistinct' // تعداد متمایز
   | 'avg'           // میانگین ساده (غیرجمع‌پذیر)
-  | 'weightedAvg'   // میانگین وزنی
+  | 'weightedAvg'   // میانگین وزنی — نیازمند ستون وزن (weightFieldId)
   | 'min'
   | 'max'
   | 'median'        // میانه (غیرجمع‌پذیر)
   | 'last'          // آخرین مقدار (نیمه‌جمع‌پذیر)
+  // محاسبات آماری پیشرفته — بخش ۱۳.۲ سند
+  | 'mode'          // نما
+  | 'range'         // دامنه تغییرات (بیشینه − کمینه)
+  | 'variance'      // واریانس — نوع (جامع/نمونه) از تنظیمات مدیر
+  | 'varianceSample' // واریانس نمونه (n−۱) — صریح
+  | 'stdDev'        // انحراف معیار — نوع از تنظیمات مدیر
+  | 'stdDevSample'  // انحراف معیار نمونه (n−۱) — صریح
+  | 'quartile1'     // چارک اول (۲۵٪)
+  | 'quartile3'     // چارک سوم (۷۵٪)
+  | 'percentile'    // صدک — با percentileP (۰..۱)
+  | 'iqr'           // فاصله بین چارکی
+  | 'cv'            // ضریب تغییرات (انحراف معیار ÷ میانگین)
 
 // تقویم پشتیبانی‌شده — بخش ۱۵.۱
 export type CalendarKind = 'jalali' | 'gregorian' | 'auto'
@@ -84,11 +96,32 @@ export interface QuerySpec {
     agg: AggregationType
     alias?: string
     displayUnit?: string      // واحد نمایش مبلغ — بخش ۱۴.۱
+    weightFieldId?: string    // ستون وزن برای میانگین وزنی — بخش ۱۳.۱
+    percentileP?: number      // صدک موردنظر ۰..۱ برای agg=percentile — بخش ۱۳.۲
   }[]
   filters?: QueryFilter[]
   orderBy?: { field: string; dir: 'asc' | 'desc' }[]
   limit?: number
   searchText?: string
+  // گزینه‌های آماری — از تنظیمات مدیر (بخش ۱۳.۲: روش صدک، نوع انحراف معیار، رفتار خالی)
+  statOptions?: StatOptions
+  // محاسبات پنجره‌ای روی نتیجه تجمیع‌شده — بخش ۱۳.۲ (میانگین متحرک، مجموع تجمعی)
+  windowCalcs?: WindowCalc[]
+}
+
+// تنظیمات آماری مدیر — بخش ۱۳.۲ سند
+export interface StatOptions {
+  percentileMethod: 'linear' | 'nearest' // روش صدک/چارک: درون‌یابی خطی (R-7) یا نزدیک‌ترین رتبه
+  stdDevType: 'sample' | 'population'    // نوع پیش‌فرض انحراف معیار و واریانس
+  nullBehavior: 'exclude' | 'zero'       // رفتار داده خالی: کنار گذاشتن یا صفر فرض کردن
+}
+
+// محاسبه پنجره‌ای روی ردیف‌های تجمیع‌شده — بخش ۱۳.۲ سند
+export interface WindowCalc {
+  type: 'cumsum' | 'movingAvg' // مجموع تجمعی یا میانگین متحرک
+  fieldAlias: string           // نام ستون سنجه در نتیجه
+  window?: number              // اندازه پنجره برای میانگین متحرک (پیش‌فرض ۳)
+  alias: string                // نام ستون خروجی
 }
 
 // نتیجه پرس‌وجو
