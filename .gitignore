@@ -75,3 +75,6 @@ dev.log
 server.log
 exports/
 next-test/
+
+# کش آزمون ایزوله Turbopack — فاز هشتم
+.next-test/
