@@ -23,6 +23,7 @@ import RelationsView from '@/components/RelationsView'
 import DataDictionaryView from '@/components/DataDictionaryView'
 import AlertsView from '@/components/AlertsView'
 import OccasionsView from '@/components/OccasionsView'
+import AiAssistantView from '@/components/AiAssistantView'
 import ConnectionsView from '@/components/ConnectionsView'
 import JobsView from '@/components/JobsView'
 import AccountSecurity from '@/components/AccountSecurity'
@@ -56,7 +57,7 @@ interface DatasetDetail extends Omit<DatasetRow, 'fields' | 'transforms'> {
   transforms: TransformStep[]
 }
 
-type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'analytics' | 'relations' | 'dictionary' | 'occasions' | 'connections' | 'reports' | 'jobs' | 'alerts' | 'admin'
+type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'analytics' | 'assistant' | 'relations' | 'dictionary' | 'occasions' | 'connections' | 'reports' | 'jobs' | 'alerts' | 'admin'
 
 export default function Home() {
   const [project, setProject] = useState<Project | null>(null)
@@ -217,6 +218,8 @@ export default function Home() {
               <TabsTrigger value="model" className="gap-1.5 text-xs" disabled={!detail}><Boxes className="size-3.5" /> مدل و شاخص‌ها</TabsTrigger>
               {/* تحلیل‌های پیشرفته — بخش ۲۱.۲ سند */}
               <TabsTrigger value="analytics" className="gap-1.5 text-xs" disabled={!detail}><TrendingUp className="size-3.5" /> تحلیل پیشرفته</TabsTrigger>
+              {/* دستیار هوشمند — بخش ۲۵ سند */}
+              <TabsTrigger value="assistant" className="gap-1.5 text-xs" disabled={!detail}><Sparkles className="size-3.5" /> دستیار هوشمند</TabsTrigger>
               <TabsTrigger value="relations" className="gap-1.5 text-xs" disabled={datasets.length < 2}><Network className="size-3.5" /> روابط جداول</TabsTrigger>
               <TabsTrigger value="dictionary" className="gap-1.5 text-xs" disabled={!project}><BookMarked className="size-3.5" /> فرهنگ داده</TabsTrigger>
               <TabsTrigger value="occasions" className="gap-1.5 text-xs" disabled={!project}><CalendarDays className="size-3.5" /> مناسبت‌ها</TabsTrigger>
@@ -348,6 +351,22 @@ export default function Home() {
               desc="روند و پیش‌بینی سری زمانی، گروه‌های زمانی (Cohort) و حفظ مخاطبان، بخش‌بندی و RFM، سناریوسازی (What-if)، همبستگی و تشخیص ناهنجاری — همراه با روش، خطای ارزیابی و عدم قطعیت (بخش‌های ۲۱.۲ و ۲۱.۳ سند)"
             />
             <AnalyticsView datasetId={detail.id} fields={fields} />
+          </div>
+        )}
+
+        {/* دستیار هوشمند — بخش ۲۵ سند */}
+        {tab === 'assistant' && detail && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<Sparkles className="size-4" />}
+              title="دستیار هوشمند و هوش مصنوعی"
+              desc="پیشنهاد نوع ستون، کلید یکتا، رابطه، پاک‌سازی، نمودار و شاخص؛ پرسش به زبان طبیعی از داده؛ پیش‌نویس توصیفی با تأیید انسانی؛ توضیح فرمول و خطا؛ الگوها و نقاط غیرعادی — اعداد با موتور تحلیل سامانه (بخش ۲۵ سند)"
+            />
+            <AiAssistantView
+              datasetId={detail.id}
+              datasetName={detail.name}
+              fields={fields.map(f => ({ id: f.id, label: f.label, type: f.type, role: f.role }))}
+            />
           </div>
         )}
 

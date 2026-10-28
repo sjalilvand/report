@@ -22,12 +22,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
 import { formatNumber, formatAmount, autoDisplayUnit, getUnit, fromBaseRial } from '@/lib/currency'
-import { toPersianDigits } from '@/lib/digits'
+import { toPersianDigits, toLatinDigits } from '@/lib/digits'
 import {
   Loader2, Play, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Table2,
   Save, FileDown, FileText, Grid3X3, X, Plus, Kanban, BookMarked, LayoutDashboard,
   TableProperties, ChevronDown, ZoomIn, RotateCcw, Crosshair, Layers, Link2,
   Combine, Activity, Flame, Boxes, TrendingUp, Filter, LayoutGrid, Presentation, ListTodo,
+  MapPin, Scale, Sparkles, ArrowUpRight, ArrowDownRight, Target,
 } from 'lucide-react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -35,6 +36,22 @@ import {
   ComposedChart, ScatterChart, Scatter, FunnelChart, Funnel, LabelList, Treemap,
 } from 'recharts'
 import { FieldMetaClient } from './ColumnsEditor'
+import { buildGeoPoints, IRAN_OUTLINE } from '@/lib/geo'
+
+// پیشنهاد نمودار هوشمند — بخش ۲۵ سند
+interface AiChartSuggestion {
+  chartType: string
+  title: string
+  reason: string
+  confidence: number
+  dims: string[]
+  measures: { fieldId?: string; agg: string }[]
+}
+interface AiSuggestResp {
+  charts: AiChartSuggestion[]
+  notices: string[]
+  scannedRecords: number
+}
 
 interface QueryRow { [k: string]: unknown }
 interface QueryResp {
@@ -70,6 +87,7 @@ interface PivotResp {
 
 type ChartType = 'table' | 'pivot' | 'matrix' | 'heatmap' | 'bar' | 'line' | 'pie' | 'kpi' | 'dashboard'
   | 'combined' | 'scatter' | 'histogram' | 'box' | 'waterfall' | 'funnel' | 'treemap'
+  | 'compare' | 'geomap'
 type CrossFilterState = { fieldId: string; value: string } | null
 type DrillStep = { fieldId: string; value: string }
 
@@ -162,6 +180,15 @@ export default function ReportBuilder({
   const [histo, setHisto] = useState<HistoResp | null>(null)
   const [box, setBox] = useState<BoxResp | null>(null)
   const [specialLoading, setSpecialLoading] = useState(false)
+
+  // کارت مقایسه‌ای — بخش ۱۹.۲
+  const [cmpMode, setCmpMode] = useState<'two' | 'target'>('two')
+  const [cmpA, setCmpA] = useState('')
+  const [cmpB, setCmpB] = useState('')
+  const [cmpTarget, setCmpTarget] = useState('')
+
+  // پیشنهاد نمودار هوشمند — بخش ۲۵
+  const [aiSuggestLoading, setAiSuggestLoading] = useState(false)
 
   // شاخص‌های تأییدشده فرهنگ داده — بخش ۱۸: قابل استفاده مجدد در گزارش‌های مختلف
   useEffect(() => {
@@ -481,6 +508,27 @@ export default function ReportBuilder({
     }
   }
 
+  // پیشنهاد نمودار هوشمند — بخش ۲۵: تفسیر از داده و اعمال خودکار پیکربندی
+  const applyAiSuggestion = async () => {
+    setAiSuggestLoading(true)
+    try {
+      const res = await api.post<AiSuggestResp>('/api/ai/suggest', { datasetId: dataset!.id })
+      const top = res.charts[0]
+      if (!top) {
+        toast({ title: 'پیشنهاد نمودار', description: res.notices.join('؛ ') || 'با این ستون‌ها پیشنهاد مشخصی ندارم (الزام بخش ۲۵: اعلام ناتوانی).', variant: 'destructive' })
+        return
+      }
+      setChartType(top.chartType as ChartType)
+      if (top.dims.length > 0) setSelDims(top.dims.slice(0, 2))
+      if (top.measures.length > 0) setSelMeasures(top.measures.map(m => ({ fieldId: m.fieldId, agg: m.agg })))
+      toast({ title: `پیشنهاد هوشمند: ${top.title}`, description: `${top.reason} — پیکربندی اعمال شد؛ «اجرای گزارش» را بزنید.` })
+    } catch (e) {
+      toast({ title: 'خطا در پیشنهاد هوشمند', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    } finally {
+      setAiSuggestLoading(false)
+    }
+  }
+
   const saveReport = async (thenSubmit = false) => {
     if (!dataset || !saveTitle.trim()) {
       toast({ title: 'عنوان گزارش الزامی است', variant: 'destructive' })
@@ -495,6 +543,7 @@ export default function ReportBuilder({
           dimensions: selDims, measures: selMeasures, filters, chartType,
           pivot: { rowDims: pivotRowDims, colDim: pivotColDim, ...pivotOpts },
           special: { fieldId: specialField, binCount, groupFieldId: boxGroupField },
+          compare: { mode: cmpMode, a: cmpA, b: cmpB, target: cmpTarget },
         },
       })
       if (thenSubmit) {
@@ -625,6 +674,50 @@ export default function ReportBuilder({
     const total = multiData.reduce((a, b) => a + Math.abs(b.v1), 0)
     return multiData.map(r => ({ name: r.name, value: Math.abs(r.v1), share: total > 0 ? (Math.abs(r.v1) / total) * 100 : 0 }))
   }, [multiData])
+
+  // کارت مقایسه‌ای — مقدارها از نتیجه اجرا (بخش ۱۹.۲)
+  const compareVals = useMemo(() => {
+    if (!result || !selDims[0]) return null
+    const alias = aliasOf(selMeasures[0] ?? { agg: 'count' })
+    const groups = result.rows
+      .map(r => ({ name: String(r[selDims[0]] ?? '—'), value: typeof r[alias] === 'number' ? r[alias] as number : 0 }))
+      .filter(g => g.name !== '—' && g.name !== '')
+    const targetNum = toLatinDigits(cmpTarget).trim() === '' ? null : parseFloat(toLatinDigits(cmpTarget).replace(/[٫,]/g, m => m === '٫' ? '.' : ''))
+    if (cmpMode === 'target') {
+      const base = cmpA === '§total'
+        ? (typeof result.totals[alias] === 'number' ? result.totals[alias] as number : 0)
+        : (groups.find(g => g.name === cmpA)?.value ?? 0)
+      if (targetNum === null) return null
+      return { kind: 'target' as const, labelA: cmpA === '§total' ? 'جمع کل' : cmpA, a: base, b: targetNum, labelB: 'هدف' }
+    }
+    const ga = groups.find(g => g.name === cmpA)
+    const gb = groups.find(g => g.name === cmpB)
+    if (!ga || !gb) return null
+    return { kind: 'two' as const, labelA: ga.name, a: ga.value, labelB: gb.name, b: gb.value }
+  }, [result, selDims, selMeasures, cmpMode, cmpA, cmpB, cmpTarget])
+
+  // نقشه جغرافیایی — تبدیل سطرهای تجمیعی به نقاط با جدول مرجع استان‌ها (بخش ۱۹.۲)
+  const geoData = useMemo(() => {
+    if (!result || !chartDim) return { points: [], unmatched: [] as string[] }
+    const alias = aliasOf(selMeasures[0] ?? { agg: 'count' })
+    const rows = result.rows.map(r => ({
+      name: String(r[chartDim] ?? '—'),
+      value: typeof r[alias] === 'number' ? r[alias] as number : 0,
+    }))
+    return buildGeoPoints(rows, 'province')
+  }, [result, chartDim, selMeasures])
+
+  // پروجکشن نقشه — مرز تقریبی ایران روی بوم SVG
+  const MAP_W = 640, MAP_H = 560
+  const projectGeo = (lng: number, lat: number) => ({
+    x: ((lng - 44) / (63.5 - 44)) * MAP_W,
+    y: ((40 - lat) / (40 - 25)) * MAP_H,
+  })
+  const iranPath = useMemo(() =>
+    IRAN_OUTLINE.map((p, i) => {
+      const { x, y } = projectGeo(p[0], p[1])
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ') + ' Z', [])
 
   // برچسب بازه‌های هیستوگرام
   const histoData = useMemo(() =>
@@ -836,6 +929,76 @@ export default function ReportBuilder({
           </Card>
         )}
 
+        {/* پیکربندی کارت مقایسه‌ای — بخش ۱۹.۲ */}
+        {chartType === 'compare' && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm"><Scale className="size-4" /> پیکربندی کارت مقایسه‌ای</CardTitle>
+              <CardDescription className="text-xs">
+                مقایسه دو گروه از یک بُعد یا مقدار در برابر هدف؛ نخست گزارش را اجرا کنید تا گروه‌ها شناسایی شوند (بخش ۱۹.۲ سند)
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs">حالت مقایسه</Label>
+                <Select value={cmpMode} onValueChange={v => { setCmpMode(v as 'two' | 'target'); setCmpA(''); setCmpB('') }}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="two">دو گروه از بُعد</SelectItem>
+                    <SelectItem value="target">مقایسه با هدف</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {cmpMode === 'two' ? (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">گروه اول</Label>
+                    <Select value={cmpA} onValueChange={setCmpA}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="انتخاب گروه اول" /></SelectTrigger>
+                      <SelectContent>
+                        {(result?.rows ?? []).map(r => String(r[selDims[0] ?? ''] ?? '')).filter(n => n && n !== '—').map(n => (
+                          <SelectItem key={n} value={n}>{n}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">گروه دوم</Label>
+                    <Select value={cmpB} onValueChange={setCmpB}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="انتخاب گروه دوم" /></SelectTrigger>
+                      <SelectContent>
+                        {(result?.rows ?? []).map(r => String(r[selDims[0] ?? ''] ?? '')).filter(n => n && n !== '—' && n !== cmpA).map(n => (
+                          <SelectItem key={n} value={n}>{n}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">مقدار پایه</Label>
+                    <Select value={cmpA} onValueChange={setCmpA}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="انتخاب پایه" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="§total">جمع کل</SelectItem>
+                        {(result?.rows ?? []).map(r => String(r[selDims[0] ?? ''] ?? '')).filter(n => n && n !== '—').map(n => (
+                          <SelectItem key={n} value={n}>{n}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">مقدار هدف</Label>
+                    <Input value={cmpTarget} onChange={e => setCmpTarget(e.target.value)} placeholder="مثال: ۱٬۰۰۰٬۰۰۰" className="h-8 text-xs" />
+                  </div>
+                </>
+              )}
+              {selDims.length === 0 && <p className="text-[10px] text-amber-600">حداقل یک بُعد انتخاب کنید (بخش ۱۹.۲ سند).</p>}
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-sm justify-between">
@@ -1023,8 +1186,17 @@ export default function ReportBuilder({
                     <SelectItem value="funnel"><span className="flex items-center gap-1.5"><Filter className="size-3.5" /> قیفی</span></SelectItem>
                     <SelectItem value="treemap"><span className="flex items-center gap-1.5"><LayoutGrid className="size-3.5" /> سهم گروه‌ها</span></SelectItem>
                     <SelectItem value="kpi"><span className="flex items-center gap-1.5"><Kanban className="size-3.5" /> کارت شاخص</span></SelectItem>
+                    <SelectItem value="compare"><span className="flex items-center gap-1.5"><Scale className="size-3.5" /> کارت مقایسه‌ای (۱۹.۲)</span></SelectItem>
+                    <SelectItem value="geomap"><span className="flex items-center gap-1.5"><MapPin className="size-3.5" /> نقشه جغرافیایی (۱۹.۲)</span></SelectItem>
                   </SelectContent>
                 </Select>
+                {/* پیشنهاد نمودار هوشمند — بخش ۲۵ */}
+                <Button
+                  variant="outline" onClick={applyAiSuggestion}
+                  disabled={aiSuggestLoading} className="h-8 gap-1.5 text-xs border-teal-300 text-teal-700 hover:bg-teal-50"
+                >
+                  {aiSuggestLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} پیشنهاد هوشمند (۲۵)
+                </Button>
                 <Button
                   onClick={execute}
                   disabled={loading || pivotLoading || dashLoading || specialLoading} className="h-8 gap-1.5 text-xs"
@@ -1425,6 +1597,101 @@ export default function ReportBuilder({
                     })}
                     {selMeasures.length === 0 && (
                       <Card><CardContent className="pt-5"><p className="text-xs text-muted-foreground">تعداد کل رکوردها</p><p className="text-2xl font-bold mt-1">{formatNumber(result.scannedRecords)}</p></CardContent></Card>
+                    )}
+                  </div>
+                ) : chartType === 'compare' ? (
+                  /* کارت مقایسه‌ای — بخش ۱۹.۲: دو گروه یا مقدار در برابر هدف با اختلاف مطلق/درصدی */
+                  compareVals ? (
+                    <div className="grid gap-3 sm:grid-cols-3 items-stretch">
+                      <Card className={compareVals.a >= compareVals.b ? 'bg-gradient-to-bl from-emerald-50 to-transparent dark:from-emerald-950/30' : ''}>
+                        <CardContent className="pt-5">
+                          <p className="text-xs text-muted-foreground">{compareVals.labelA}</p>
+                          <p className="text-2xl font-bold mt-1 tabular-nums">{fmtVal(compareVals.a)}</p>
+                        </CardContent>
+                      </Card>
+                      <Card className="flex items-center justify-center border-dashed">
+                        <CardContent className="pt-5 text-center">
+                          {compareVals.a >= compareVals.b ? <ArrowUpRight className="size-5 text-emerald-600 mx-auto" /> : <ArrowDownRight className="size-5 text-red-600 mx-auto" />}
+                          <p className="text-xs text-muted-foreground mt-1">اختلاف</p>
+                          <p className="text-lg font-bold tabular-nums">{fmtVal(Math.abs(compareVals.a - compareVals.b))}</p>
+                          {compareVals.b !== 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              {toPersianDigits((Math.abs((compareVals.a - compareVals.b) / Math.abs(compareVals.b)) * 100).toFixed(1))}٪ {compareVals.a >= compareVals.b ? 'بیشتر' : 'کمتر'}
+                            </p>
+                          )}
+                        </CardContent>
+                      </Card>
+                      <Card className={compareVals.b > compareVals.a ? 'bg-gradient-to-bl from-emerald-50 to-transparent dark:from-emerald-950/30' : ''}>
+                        <CardContent className="pt-5">
+                          <p className="text-xs text-muted-foreground">
+                            {compareVals.labelB}
+                            {compareVals.kind === 'target' && <Target className="inline size-3.5 me-1 text-primary" />}
+                          </p>
+                          <p className="text-2xl font-bold mt-1 tabular-nums">{fmtVal(compareVals.b)}</p>
+                          {compareVals.kind === 'target' && compareVals.b !== 0 && (
+                            <div className="mt-2">
+                              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.min(100, (Math.abs(compareVals.a) / Math.abs(compareVals.b)) * 100)}%` }} />
+                              </div>
+                              <p className="text-[10px] text-muted-foreground mt-1">تحقق هدف: {toPersianDigits(((Math.abs(compareVals.a) / Math.abs(compareVals.b)) * 100).toFixed(1))}٪</p>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+                      <Scale className="size-10 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">گزارش را اجرا و سپس دو گروه (یا مقدار پایه و هدف) را از پیکربندی انتخاب کنید (بخش ۱۹.۲ سند)</p>
+                    </div>
+                  )
+                ) : chartType === 'geomap' ? (
+                  /* نقشه جغرافیایی — بخش ۱۹.۲: حباب‌ها روی مرز تقریبی ایران با جدول مرجع استان‌ها */
+                  <div className="space-y-2">
+                    {geoData.points.length > 0 ? (() => {
+                      const maxV = Math.max(...geoData.points.map(p => Math.abs(p.value)), 1)
+                      const minV = Math.min(...geoData.points.map(p => p.value), 0)
+                      return (
+                        <div className="rounded-lg border p-2 bg-sky-50/40 dark:bg-sky-950/20">
+                          <svg viewBox={`0 0 ${MAP_W} ${MAP_H}`} className="w-full h-auto" role="img" aria-label="نقشه جغرافیایی حبابی ایران">
+                            {[0, 0.25, 0.5, 0.75, 1].map(t => (
+                              <g key={t} stroke="#94a3b8" strokeOpacity={0.25} strokeWidth={1}>
+                                <line x1={0} y1={t * MAP_H} x2={MAP_W} y2={t * MAP_H} />
+                                <line x1={t * MAP_W} y1={0} x2={t * MAP_W} y2={MAP_H} />
+                              </g>
+                            ))}
+                            <path d={iranPath} fill="#e2e8f0" fillOpacity={0.55} stroke="#64748b" strokeWidth={1.5} strokeDasharray="4 3" />
+                            {geoData.points.map((p, i) => {
+                              const { x, y } = projectGeo(p.lng, p.lat)
+                              const r = 6 + Math.sqrt(Math.abs(p.value) / maxV) * 16
+                              const t = maxV > minV ? (p.value - minV) / (maxV - minV) : 0
+                              const color = `rgb(${Math.round(125 + (5 - 125) * t)}, ${Math.round(211 + (150 - 211) * t)}, ${Math.round(190 + (105 - 190) * t)})`
+                              return (
+                                <g key={i}>
+                                  <circle cx={x} cy={y} r={r} fill={color} fillOpacity={0.75} stroke="#0f766e" strokeWidth={1} />
+                                  <title>{`${p.province} — ${fmtVal(p.value)}`}</title>
+                                  {r > 9 && <text x={x} y={y - r - 4} textAnchor="middle" fontSize={10} fill="#334155">{p.name}</text>}
+                                </g>
+                              )
+                            })}
+                          </svg>
+                        </div>
+                      )
+                    })() : (
+                      <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+                        <MapPin className="size-10 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">بُعد مکانی (استان) و سنجه را انتخاب و گزارش را اجرا کنید (بخش ۱۹.۲ سند)</p>
+                      </div>
+                    )}
+                    {geoData.unmatched.length > 0 && (
+                      <p className="text-xs text-amber-600">
+                        {toPersianDigits(String(geoData.unmatched.length))} مقدار با استان‌های مرجع تطبیق نیافت: {geoData.unmatched.slice(0, 6).join('، ')}{geoData.unmatched.length > 6 ? ' …' : ''}
+                      </p>
+                    )}
+                    {geoData.points.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        اندازه حباب متناسب با مقدار سنجه و رنگ از روشن (کم) به تیره (زیاد) است — مرز تقریبی ایران فقط زمینه نمایشی است (بخش ۱۹.۲ سند).
+                      </p>
                     )}
                   </div>
                 ) : chartType === 'table' ? (

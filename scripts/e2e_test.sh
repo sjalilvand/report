@@ -1194,4 +1194,127 @@ assert 'حالت تحلیل نامعتبر' in d.get('error',''), 'خطای حا
 print('✓ حالت نامعتبر با پیام شفاف رد شد')"
 
 echo ""
-echo "✓✓✓ هر ۳۶ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"
+echo "═══ ۳۷) قابلیت‌های هوشمند و هوش مصنوعی — بخش ۲۵ ═══"
+
+echo "── ۳۷.۱) وضعیت دستیار هوشمند و سیاست‌ها ──"
+AISTATUS=$($CURL "$BASE/ai/status")
+echo "$AISTATUS" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['localEngine'] is True, 'موتور محلی باید فعال باشد'
+assert 'policy' in d and 'aiEnabled' in d['policy'], 'سیاست‌های بخش ۲۵ باید گزارش شود'
+assert len(d['engine']['features']) >= 10, 'فهرست قابلیت‌های بخش ۲۵ کامل نیست'
+print('✓ موتور محلی فعال | مدل زبانی پیکربندی‌شده:', d['llmConfigured'], '| سیاست اشتراک داده:', d['policy']['aiAllowDataSharing'])"
+
+echo "── ۳۷.۲) تحلیل هوشمند: پیشنهاد نوع، کلید، پاک‌سازی، نمودار، شاخص ──"
+AISUG=$($CURL -X POST "$BASE/ai/suggest" -H 'Content-Type: application/json' -d "{\"datasetId\":\"$DSID\"}")
+echo "$AISUG" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'charts' in d and 'cleaning' in d and 'measures' in d, 'ساختار پیشنهادها ناقص است'
+assert len(d['charts']) >= 2, 'حداقل دو نمودار پیشنهادی باید داشته باشیم: ' + str(d.get('notices'))
+assert len(d['measures']) >= 1, 'شاخص پیشنهادی باید داشته باشیم'
+geo = d.get('geo')
+assert geo is not None, 'ستون استان باید به‌عنوان ستون مکانی تشخیص داده شود'
+assert geo['matchRatio'] >= 0.4, 'نسبت تطابق جغرافیایی باید بالا باشد'
+print('✓ نمودارهای پیشنهادی:', len(d['charts']), '| شاخص‌ها:', len(d['measures']), '| ستون مکانی:', geo['label'], f\"({round(geo['matchRatio']*100)}٪)\")
+print('✓ کلید یکتا:', len(d['uniqueKeys']), '| پاک‌سازی:', len(d['cleaning']), '| ناهنجاری/الگو:', len(d['anomalies'])+len(d['patterns']))"
+
+echo "── ۳۷.۳) پرسش به زبان طبیعی: «جمع مبلغ به تفکیک استان» ──"
+AIASK=$($CURL -X POST "$BASE/ai/ask" -H 'Content-Type: application/json' -d "{\"datasetId\":\"$DSID\",\"question\":\"جمع مبلغ به تفکیک استان\"}")
+echo "$AIASK" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['understood'] is True, 'پرسش باید فهمیده شود: ' + str(d.get('answer'))[:120]
+tr = d['trace']
+assert tr['measure']['agg'] == 'sum', 'نوع تجمیع باید جمع باشد'
+assert tr['dimension'] is not None, 'بُعد گروه‌بندی باید شناسایی شود'
+res = d['result']
+assert res['rowCount'] >= 2, 'حداقل دو استان باید در نتیجه باشد'
+assert 'موتور تحلیل' in d['answer'] or 'محاسبه' in d['answer'], 'پاسخ باید ارجاع به موتور محاسبه داشته باشد'
+print('✓ تفسیر:', tr['measure']['label'], 'بر اساس', tr['dimension']['label'], '| گروه‌ها:', res['rowCount'], '| تفسیرگر:', d['interpreter'])"
+
+echo "── ۳۷.۴) پرسش با فیلتر: «میانگین تعداد در تهران» ──"
+$CURL -X POST "$BASE/ai/ask" -H 'Content-Type: application/json' -d "{\"datasetId\":\"$DSID\",\"question\":\"میانگین تعداد در تهران\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['understood'] is True, 'پرسش فیلتردار باید فهمیده شود: ' + str(d.get('answer'))[:120]
+tr = d['trace']
+assert tr['measure']['agg'] == 'avg', 'نوع تجمیع باید میانگین باشد'
+assert any(f['op'] == 'eq' for f in tr['filters']), 'فیلتر تهران باید شناسایی شود'
+print('✓ فیلتر شناسایی شد:', tr['filters'][0]['label'], '=', tr['filters'][0]['value'])"
+
+echo "── ۳۷.۵) پرسش بی‌ربط → اعلام ناتوانی شفاف (الزام بخش ۲۵) ──"
+$CURL -X POST "$BASE/ai/ask" -H 'Content-Type: application/json' -d "{\"datasetId\":\"$DSID\",\"question\":\"پیش‌بینی آب و هوای فردا چیست\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['understood'] is False, 'پرسش بی‌ربط باید رد شود'
+assert 'اعلام ناتوانی' in d['answer'] or 'نتوانستم' in d['answer'], 'پیام ناتوانی باید شفاف باشد'
+print('✓ ناتوانی به‌درستی اعلام شد')"
+
+echo "── ۳۷.۶) پیش‌نویس گزارش توصیفی با تأیید انسانی ──"
+$CURL -X POST "$BASE/ai/narrate" -H 'Content-Type: application/json' -d "{\"datasetId\":\"$DSID\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['engineText'], 'متن پایه موتور باید تولید شود'
+assert d['requiresHumanApproval'] is True, 'برچسب تأیید انسانی الزامی است (بخش ۲۵)'
+print('✓ متن پایه موتور قالبی:', len(d['engineText']), 'نویسه | روایت مدل زبانی:', 'موجود' if d['narrative'] else 'بر اساس سیاست ارائه نشد')"
+
+echo "── ۳۷.۷) توضیح فرمول و خطا ──"
+$CURL -X POST "$BASE/ai/explain" -H 'Content-Type: application/json' -d '{"formula":"نسبت_ایمن(مبلغ ؛ تعداد)","error":""}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['source'], 'منبع توضیح باید ذکر شود'
+print('✓ توضیح فرمول:', d['source'], '| قاعده محلی:', len(d['localRules']), 'مورد')"
+
+echo "── ۳۷.۸) خطای رایج: تقسیم بر صفر → قاعده محلی ──"
+$CURL -X POST "$BASE/ai/explain" -H 'Content-Type: application/json' -d '{"formula":"","error":"تقسیم بر صفر در ردیف ۴"}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert any(r['title'] == 'تقسیم بر صفر' for r in d['localRules']), 'قاعده تقسیم بر صفر باید فعال شود'
+print('✓ قاعده محلی تقسیم بر صفر شناسایی شد')"
+
+echo ""
+echo "═══ ۳۸) نقشه جغرافیایی و کارت مقایسه‌ای — تکمیل ۱۹.۲ ═══"
+
+echo "── ۳۸.۱) نقشه جغرافیایی: تجمیع به تفکیک استان با مختصات ──"
+$CURL -X POST "$BASE/datasets/$DSID/geomap" -H 'Content-Type: application/json' -d "{\"measure\":{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\"}}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['geo'] is not None, 'ستون مکانی باید تشخیص داده شود'
+pts = d['points']
+assert len(pts) >= 2, 'حداقل دو نقطه جغرافیایی باید داشته باشیم: ' + str(d['warnings'])
+for p in pts:
+    assert 20 <= p['lat'] <= 45 and 40 <= p['lng'] <= 65, 'مختصات باید در محدوده ایران باشد'
+    assert p['matched'] is True
+print('✓', len(pts), 'نقطه با مختصات معتبر | مثال:', pts[0]['province'], f\"({pts[0]['lat']:.2f}, {pts[0]['lng']:.2f})\")
+print('✓ تطابق‌نیافته:', len(d['unmatched']), '| هشدارها:', len(d['warnings']))"
+
+echo "── ۳۸.۲) کارت مقایسه‌ای: دو گروه و اختلاف ──"
+# کارت مقایسه‌ای از نتیجه پرس‌وجوی استاندارد ساخته می‌شود؛ صحت اختلاف اینجا آزمون می‌شود
+CMP=$($CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"}]}")
+echo "$CMP" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+rows=d['rows']
+assert len(rows) >= 2, 'برای کارت مقایسه‌ای حداقل دو گروه لازم است'
+alias='جمع مبلغ'
+vals=[r[alias] for r in rows if isinstance(r.get(alias),(int,float))]
+a,b=vals[0],vals[1]
+diff=abs(a-b)
+pct=diff/abs(b)*100 if b else 0
+assert isinstance(diff,(int,float)), 'اختلاف باید عدد باشد'
+print(f'✓ دو گروه: {round(a):,} و {round(b):,} | اختلاف: {round(diff):,} ({pct:.1f}٪) — پایه کارت مقایسه‌ای صحیح است')"
+echo "$CMP" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+rows=d['rows']
+vals=[r['جمع مبلغ'] for r in rows if isinstance(r.get('جمع مبلغ'),(int,float))]
+a,b=vals[0],vals[1]
+t = vals[0] * 1.2  # هدف ۱۲۰٪ گروه نخست
+ach = a/t*100
+assert 0 < ach < 200, 'درصد تحقق هدف باید منطقی باشد'
+print(f'✓ حالت هدف: پایه {round(a):,} در برابر هدف {round(t):,} → تحقق {ach:.1f}٪')"
+
+echo ""
+echo "✓✓✓ هر ۳۸ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"

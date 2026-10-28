@@ -43,6 +43,10 @@ export interface PlatformSettings {
   // صف پردازش خروجی حجیم — بخش ۲۸ (Job/Export) و ۳۰.۲ (پایداری)
   exportQueueConcurrency: number // تعداد پردازش هم‌زمان صف خروجی
   exportFileTtlHours: number   // مدت اعتبار فایل خروجی و لینک دانلود — ابطال خودکار
+  // قابلیت‌های هوشمند و هوش مصنوعی — بخش ۲۵ سند (سیاست و مجوز)
+  aiEnabled: boolean           // فعال‌بودن دستیار هوشمند (پرسش به زبان طبیعی، توضیح فرمول، روایت‌سازی)
+  aiAllowDataSharing: boolean  // مجوز ارسال نمونه داده به سرویس مدل زبانی بیرونی (الزام بخش ۲۵)
+  aiMaxRowsShared: number      // سقف ردیف‌های نمونه قابل ارسال به سرویس بیرونی
 }
 
 // اهداف پیشنهادی اولیه سند — مشروط به آزمون با داده واقعی سازمان (بخش ۳۰.۱ و ۳۷)
@@ -81,6 +85,9 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   ssoAllowedDomain: '',
   exportQueueConcurrency: 1,
   exportFileTtlHours: 48,
+  aiEnabled: true,
+  aiAllowDataSharing: false,
+  aiMaxRowsShared: 100,
 }
 
 export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
@@ -118,6 +125,9 @@ export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
   ssoAllowedDomain: 'محدودیت دامنه ایمیل (خالی = بدون محدودیت)',
   exportQueueConcurrency: 'تعداد پردازش هم‌زمان صف خروجی',
   exportFileTtlHours: 'مدت اعتبار فایل خروجی (ساعت)',
+  aiEnabled: 'دستیار هوشمند و هوش مصنوعی (بخش ۲۵)',
+  aiAllowDataSharing: 'مجوز ارسال نمونه داده به سرویس مدل زبانی بیرونی',
+  aiMaxRowsShared: 'سقف ردیف‌های قابل ارسال به سرویس بیرونی',
 }
 
 // فیلدهایی که در پاسخ GET ماسک می‌شوند — جلوگیری از نشت گذرواژه (بخش ۲۹)
