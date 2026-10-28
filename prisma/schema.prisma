@@ -128,8 +128,29 @@ model Report {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   approvals   ApprovalEvent[]
+  versions    ReportVersion[]
 
   @@index([projectId])
+}
+
+// نسخه ثبت‌شده گزارش — بخش ۲۶.۱ سند («مقایسه نسخه‌ها» و «ثبت دلیل تغییر»)
+// در هر ذخیره/به‌روزرسانی گزارش، یک عکس‌فوری از پیکربندی نگه داشته می‌شود تا
+// تاریخچه کامل نسخه‌ها قابل مرور و دو نسخه دلخواه قابل مقایسه باشند
+model ReportVersion {
+  id          String   @id @default(cuid())
+  reportId    String
+  report      Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  version     Int      // شماره نسخه — یکتا برای هر گزارش
+  title       String
+  description String?
+  config      String   @default("{}") // JSON: پیکربندی کامل گزارش در لحظه ثبت نسخه
+  status      String // وضعیت گردش کار در لحظه ثبت نسخه
+  reason      String? // دلیل تغییر — بخش ۲۶.۱ («ثبت دلیل تغییر»)
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  @@unique([reportId, version])
+  @@index([reportId])
 }
 
 // ثبت رویداد — AuditEvent در بخش ۲۸ (بخش ۴: ردیابی)

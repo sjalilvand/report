@@ -24,7 +24,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     const user = await requirePerm(req, 'report.create')
     const { id } = await ctx.params
     const body = await req.json()
-    const existing = await db.report.findUnique({ where: { id } })
+    const existing = await db.report.findUnique({ where: { id }, include: { versions: true } })
     if (!existing) return fail('گزارش یافت نشد.', 404)
 
     // فقط گزارش در وضعیت پیش‌نویس/ردشده قابل ویرایش است — بخش ۲۶.۱
@@ -48,7 +48,39 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     data.version = existing.version + 1
 
     const report = await db.report.update({ where: { id }, data })
-    await logAudit(existing.projectId, 'به‌روزرسانی گزارش', `گزارش «${report.title}» — نسخه ${report.version}`, user.name)
+
+    // عکس‌فوری نسخه‌ها — بخش ۲۶.۱ («مقایسه نسخه‌ها» و «ثبت دلیل تغییر»)
+    // اگر گزارش قدیمی است و نسخه‌ای ثبت نشده، ابتدا وضعیت پیشین جبران می‌شود
+    const hasCurrentSnapshot = existing.versions.some(v => v.version === existing.version)
+    if (!hasCurrentSnapshot) {
+      await db.reportVersion.create({
+        data: {
+          reportId: id,
+          version: existing.version,
+          title: existing.title,
+          description: existing.description,
+          config: existing.config,
+          status: existing.status,
+          reason: existing.version === 1 ? 'ایجاد نسخه اولیه' : 'ثبت جبرانی وضعیت پیشین (گزارش پیش از فعال‌سازی نسخه‌بندی)',
+          createdBy: existing.createdBy,
+        },
+      })
+    }
+    const reason = body.changeReason ? String(body.changeReason).trim() : ''
+    await db.reportVersion.create({
+      data: {
+        reportId: id,
+        version: report.version,
+        title: report.title,
+        description: report.description,
+        config: report.config,
+        status: report.status,
+        reason: reason || 'به‌روزرسانی پیکربندی گزارش',
+        createdBy: user.name,
+      },
+    })
+
+    await logAudit(existing.projectId, 'به‌روزرسانی گزارش', `گزارش «${report.title}» — نسخه ${report.version}${reason ? ` | دلیل: ${reason}` : ''}`, user.name)
     return ok(report)
   } catch (e) {
     return errorResponse(e)

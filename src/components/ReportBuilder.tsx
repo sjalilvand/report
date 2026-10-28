@@ -917,10 +917,11 @@ export default function ReportBuilder({
               </div>
             ))}
             {/* منبع فیلتر: همین جدول یا جدول مرتبط از طریق رابطه فعال — بخش ۱۹.۳ */}
-            <Select value={filterRel} onValueChange={v => { setFilterRel(v); setFilterField(''); setOpts(null) }}>
+            {/* نکته: Radix UI مقدار خالی در SelectItem را نمی‌پذیرد؛ مقدار صوری «self» به '' نگاشت می‌شود */}
+            <Select value={filterRel || 'self'} onValueChange={v => { setFilterRel(v === 'self' ? '' : v); setFilterField(''); setOpts(null) }}>
               <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="">همین مجموعه‌داده</SelectItem>
+                <SelectItem value="self">همین مجموعه‌داده</SelectItem>
                 {relations.map(r => {
                   const other = datasets.find(d => d.id === otherSideOf(r))
                   return <SelectItem key={r.id} value={r.id}>از جدول «{other?.name ?? 'مرتبط'}» — رابطه {r.name}</SelectItem>

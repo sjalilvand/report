@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // distDir قابل تغییر برای اجرای موازی دو نمونه (آزمون خودکار) — پیش‌فرض .next
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // کتابخانه‌های بومی/سنگین سمت سرور خارج از باندلر — پایداری Turbopack
   serverExternalPackages: ["pptxgenjs", "@react-pdf/renderer", "nodemailer", "xlsx"],
   /* config options here */

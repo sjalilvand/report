@@ -32,16 +32,30 @@ export async function POST(req: NextRequest) {
     const title = String(body.title ?? '').trim()
     if (!projectId || !title) return fail('پروژه و عنوان گزارش الزامی است.')
 
+    const configStr = JSON.stringify(body.config ?? {})
     const report = await db.report.create({
       data: {
         projectId,
         datasetId: body.datasetId ? String(body.datasetId) : null,
         title,
         description: body.description ? String(body.description) : null,
-        config: JSON.stringify(body.config ?? {}),
+        config: configStr,
         status: 'draft',
         createdBy: user.name,
+        // عکس‌فوری نسخه ۱ — بخش ۲۶.۱ (مقایسه نسخه‌ها)
+        versions: {
+          create: {
+            version: 1,
+            title,
+            description: body.description ? String(body.description) : null,
+            config: configStr,
+            status: 'draft',
+            reason: 'ایجاد نسخه اولیه',
+            createdBy: user.name,
+          },
+        },
       },
+      include: { versions: true },
     })
     await logAudit(projectId, 'ذخیره گزارش', `گزارش «${title}» به‌عنوان پیش‌نویس ذخیره شد (نسخه ۱)`, user.name)
     return ok(report, 201)

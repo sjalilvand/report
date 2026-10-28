@@ -74,3 +74,4 @@ tool-results/
 dev.log
 server.log
 exports/
+next-test/

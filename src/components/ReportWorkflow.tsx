@@ -13,9 +13,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import {
-  ClipboardCheck, CheckCircle2, Send, UploadCloud, Undo2, XCircle, History, FileBarChart2,
+  ClipboardCheck, CheckCircle2, Send, UploadCloud, Undo2, XCircle, History, FileBarChart2, GitCompareArrows, Plus, Minus, PenLine,
 } from 'lucide-react'
 
 export interface WorkflowUser {
@@ -46,6 +47,36 @@ interface ReportRow {
   datasetId?: string | null
 }
 
+// نسخه‌های گزارش — بخش ۲۶.۱ (مقایسه نسخه‌ها)
+interface VersionRow {
+  id: string
+  version: number
+  title: string
+  description?: string | null
+  status: string
+  reason?: string | null
+  createdBy?: string | null
+  createdAt: string
+}
+
+interface ChangeItem {
+  kind: string
+  kindLabel: string
+  op: 'added' | 'removed' | 'changed'
+  opLabel: string
+  label: string
+  from?: string
+  to?: string
+}
+
+interface VersionDiff {
+  fromVersion: number
+  toVersion: number
+  items: ChangeItem[]
+  summary: { added: number; removed: number; changed: number }
+  identical: boolean
+}
+
 const STATUS_META: Record<string, { label: string; className: string }> = {
   draft: { label: 'پیش‌نویس', className: 'bg-slate-100 text-slate-700 border-slate-200' },
   pending: { label: 'در انتظار تأیید', className: 'bg-amber-50 text-amber-700 border-amber-200' },
@@ -74,6 +105,14 @@ export default function ReportWorkflow({ projectId, user, datasets }: {
   const [rejectTarget, setRejectTarget] = useState<ReportRow | null>(null)
   const [rejectComment, setRejectComment] = useState('')
   const [busy, setBusy] = useState(false)
+  // مقایسه نسخه‌ها — بخش ۲۶.۱
+  const [versionsTarget, setVersionsTarget] = useState<ReportRow | null>(null)
+  const [versionList, setVersionList] = useState<VersionRow[]>([])
+  const [currentVersion, setCurrentVersion] = useState(1)
+  const [fromVer, setFromVer] = useState('')
+  const [toVer, setToVer] = useState('')
+  const [diff, setDiff] = useState<VersionDiff | null>(null)
+  const [versionsLoading, setVersionsLoading] = useState(false)
   const { toast } = useToast()
 
   const load = useCallback(async () => {
@@ -126,6 +165,43 @@ export default function ReportWorkflow({ projectId, user, datasets }: {
     } catch {
       setTimeline({ reportId, events: [] })
     }
+  }
+
+  // بازکردن دیالوگ نسخه‌ها و مقایسه — بخش ۲۶.۱
+  const openVersions = async (report: ReportRow) => {
+    setVersionsTarget(report)
+    setDiff(null)
+    setVersionsLoading(true)
+    try {
+      const res = await api.get<{ currentVersion: number; versions: VersionRow[] }>(`/api/reports/${report.id}/versions`)
+      setVersionList(res.versions)
+      setCurrentVersion(res.currentVersion)
+      // پیش‌فرض: قدیمی‌ترین نسخه ← نسخه جاری
+      const oldest = res.versions.length > 0 ? String(res.versions[res.versions.length - 1].version) : '1'
+      setFromVer(oldest)
+      setToVer(String(res.currentVersion))
+      await loadDiff(report.id, oldest, String(res.currentVersion))
+    } catch {
+      setVersionList([])
+    } finally {
+      setVersionsLoading(false)
+    }
+  }
+
+  const loadDiff = async (reportId: string, from: string, to: string) => {
+    if (!from || !to) return
+    try {
+      const d = await api.get<VersionDiff>(`/api/reports/${reportId}/versions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+      setDiff(d)
+    } catch {
+      setDiff(null)
+    }
+  }
+
+  const changeVersions = async (from: string, to: string) => {
+    setFromVer(from)
+    setToVer(to)
+    if (versionsTarget) await loadDiff(versionsTarget.id, from, to)
   }
 
   const canSubmit = user?.role === 'admin' || user?.role === 'steward' || user?.role === 'analyst'
@@ -203,6 +279,9 @@ export default function ReportWorkflow({ projectId, user, datasets }: {
                         )}
                         <Button size="sm" variant="ghost" className="h-7 text-[11px] gap-1"
                           onClick={() => openTimeline(r.id)}><History className="size-3" /> تاریخچه</Button>
+                        {/* مقایسه نسخه‌ها — بخش ۲۶.۱ سند */}
+                        <Button size="sm" variant="ghost" className="h-7 text-[11px] gap-1"
+                          onClick={() => openVersions(r)}><GitCompareArrows className="size-3" /> نسخه‌ها و مقایسه</Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -237,6 +316,130 @@ export default function ReportWorkflow({ projectId, user, datasets }: {
           </div>
         )}
       </CardContent>
+
+      {/* دیالوگ نسخه‌ها و مقایسه — بخش ۲۶.۱ (مقایسه نسخه‌ها + ثبت دلیل تغییر) */}
+      <Dialog open={!!versionsTarget} onOpenChange={v => !v && setVersionsTarget(null)}>
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <GitCompareArrows className="size-4 text-primary" /> نسخه‌های گزارش «{versionsTarget?.title}»
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* تاریخچه نسخه‌ها */}
+            <div>
+              <p className="text-xs font-medium mb-2">تاریخچه نسخه‌ها (ثبت دلیل تغییر — بخش ۲۶.۱ سند):</p>
+              {versionsLoading ? (
+                <p className="text-xs text-muted-foreground">در حال بارگذاری…</p>
+              ) : versionList.length === 0 ? (
+                <p className="text-xs text-muted-foreground">نسخه‌ای ثبت نشده است؛ با ذخیره دوباره گزارش (پیش‌نویس) نسخه‌بندی فعال می‌شود.</p>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead className="text-right text-xs">نسخه</TableHead>
+                        <TableHead className="text-right text-xs">وضعیت</TableHead>
+                        <TableHead className="text-right text-xs">دلیل تغییر</TableHead>
+                        <TableHead className="text-right text-xs">کاربر</TableHead>
+                        <TableHead className="text-right text-xs">زمان</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {versionList.map(v => (
+                        <TableRow key={v.id}>
+                          <TableCell className="text-xs font-medium">
+                            v{v.version.toLocaleString('fa-IR')}
+                            {v.version === currentVersion && <Badge variant="secondary" className="ms-1.5 text-[9px]">جاری</Badge>}
+                          </TableCell>
+                          <TableCell className="text-xs">{STATUS_META[v.status]?.label ?? v.status}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground max-w-56">{v.reason ?? '—'}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{v.createdBy ?? '—'}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{new Date(v.createdAt).toLocaleString('fa-IR')}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+
+            {/* انتخاب دو نسخه برای مقایسه */}
+            {versionList.length >= 1 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium">مقایسه دو نسخه:</p>
+                <div className="flex items-center gap-2">
+                  <Select value={fromVer || undefined} onValueChange={v => changeVersions(v, toVer)}>
+                    <SelectTrigger className="h-8 text-xs flex-1"><SelectValue placeholder="نسخه مبدأ" /></SelectTrigger>
+                    <SelectContent>
+                      {versionList.map(v => <SelectItem key={v.id} value={String(v.version)}>نسخه {v.version.toLocaleString('fa-IR')}{v.version === currentVersion ? ' (جاری)' : ''}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <GitCompareArrows className="size-4 text-muted-foreground shrink-0" />
+                  <Select value={toVer || undefined} onValueChange={v => changeVersions(fromVer, v)}>
+                    <SelectTrigger className="h-8 text-xs flex-1"><SelectValue placeholder="نسخه مقصد" /></SelectTrigger>
+                    <SelectContent>
+                      {versionList.map(v => <SelectItem key={v.id} value={String(v.version)}>نسخه {v.version.toLocaleString('fa-IR')}{v.version === currentVersion ? ' (جاری)' : ''}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* نتیجه مقایسه */}
+                {diff && (
+                  <div className="space-y-2">
+                    {diff.identical ? (
+                      <Alert>
+                        <AlertDescription className="text-xs">
+                          این دو نسخه پیکربندی یکسانی دارند — تفاوتی یافت نشد.
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <Badge variant="outline" className="gap-1 text-emerald-700 border-emerald-200 bg-emerald-50"><Plus className="size-3" /> {diff.summary.added.toLocaleString('fa-IR')} افزوده</Badge>
+                          <Badge variant="outline" className="gap-1 text-red-700 border-red-200 bg-red-50"><Minus className="size-3" /> {diff.summary.removed.toLocaleString('fa-IR')} حذف</Badge>
+                          <Badge variant="outline" className="gap-1 text-amber-700 border-amber-200 bg-amber-50"><PenLine className="size-3" /> {diff.summary.changed.toLocaleString('fa-IR')} تغییر</Badge>
+                          <span className="text-muted-foreground">نسخه {diff.fromVersion.toLocaleString('fa-IR')} ← نسخه {diff.toVersion.toLocaleString('fa-IR')}</span>
+                        </div>
+                        <div className="rounded-lg border overflow-hidden">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-muted/40">
+                                <TableHead className="text-right text-xs">بخش</TableHead>
+                                <TableHead className="text-right text-xs">تغییر</TableHead>
+                                <TableHead className="text-right text-xs">شرح</TableHead>
+                                <TableHead className="text-right text-xs">مقدار پیشین</TableHead>
+                                <TableHead className="text-right text-xs">مقدار جدید</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {diff.items.map((it, i) => (
+                                <TableRow key={i} className={it.op === 'added' ? 'bg-emerald-50/40' : it.op === 'removed' ? 'bg-red-50/40' : 'bg-amber-50/30'}>
+                                  <TableCell className="text-xs">{it.kindLabel}</TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline" className={`text-[10px] gap-1 ${it.op === 'added' ? 'text-emerald-700 border-emerald-200' : it.op === 'removed' ? 'text-red-700 border-red-200' : 'text-amber-700 border-amber-200'}`}>
+                                      {it.op === 'added' ? <Plus className="size-3" /> : it.op === 'removed' ? <Minus className="size-3" /> : <PenLine className="size-3" />}
+                                      {it.opLabel}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-xs">{it.label}</TableCell>
+                                  <TableCell className="text-xs text-muted-foreground max-w-40 truncate" title={it.from}>{it.from ?? '—'}</TableCell>
+                                  <TableCell className="text-xs text-muted-foreground max-w-40 truncate" title={it.to}>{it.to ?? '—'}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!rejectTarget} onOpenChange={v => !v && setRejectTarget(null)}>
         <DialogContent className="sm:max-w-md" dir="rtl">

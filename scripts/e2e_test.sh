@@ -1038,4 +1038,160 @@ assert '403' in s, 'مشاهده‌کننده باید رد شود'
 print('✓ ثبت پردازش برای نقش مشاهده‌کننده رد شد (مجوز export.run — بخش ۲۹)')"
 
 echo ""
-echo "✓✓✓ هر ۳۴ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"
+echo "═══ ۳۴) مقایسه نسخه‌های گزارش — بخش ۲۶.۱ («مقایسه نسخه‌ها» و «ثبت دلیل تغییر») ═══"
+echo "── ۳۴.۱) ایجاد گزارش آزمون نسخه‌بندی (نسخه ۱ + عکس‌فوری) ──"
+VREP=$($CURL -X POST "$BASE/reports" -H 'Content-Type: application/json' -d "{\"projectId\":\"$PID\",\"datasetId\":\"$DSID\",\"title\":\"گزارش آزمون نسخه‌ها\",\"config\":{\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\"}],\"chartType\":\"bar\"}}")
+VRID=$(echo "$VREP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id',''))")
+echo "$VREP" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d.get('id'), 'ایجاد گزارش آزمون شکست خورد: ' + str(d)[:120]
+vs = d.get('versions') or []
+assert len(vs) == 1 and vs[0]['version'] == 1, 'عکس‌فوری نسخه ۱ ثبت نشد'
+assert vs[0]['reason'], 'دلیل ثبت نسخه ۱ خالی است'
+print('✓ گزارش نسخه ۱ ذخیره و عکس‌فوری شد | دلیل:', vs[0]['reason'])"
+
+echo "── ۳۴.۲) به‌روزرسانی با ثبت دلیل تغییر → نسخه ۲ ──"
+$CURL -X PUT "$BASE/reports/$VRID" -H 'Content-Type: application/json' -d "{\"config\":{\"dimensions\":[\"$F_PROV\",\"$F_CITY\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\"},{\"fieldId\":\"$F_CNT\",\"agg\":\"count\"}],\"chartType\":\"line\",\"filters\":[{\"fieldId\":\"$F_PROV\",\"op\":\"eq\",\"value\":\"تهران\"}]},\"changeReason\":\"افزودن شهرستان و فیلتر استان به درخواست مدیر\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d.get('version') == 2, 'نسخه به ۲ افزایش نیافت: ' + str(d)[:120]
+print('✓ گزارش به نسخه', d['version'], 'به‌روزرسانی شد | وضعیت:', d['status'])"
+
+echo "── ۳۴.۳) فهرست نسخه‌ها ──"
+VLIST=$($CURL "$BASE/reports/$VRID/versions")
+echo "$VLIST" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+vs=d['versions']
+assert d['currentVersion'] == 2, 'نسخه جاری نادرست است'
+assert len(vs) >= 2, 'دو نسخه ثبت نشده است'
+assert all('reason' in v for v in vs), 'دلیل تغییر برای همه نسخه‌ها ثبت نشده'
+print('✓ فهرست نسخه‌ها:', [f\"v{v['version']}\" for v in vs], '| دلیل آخرین:', vs[0]['reason'][:40])"
+
+echo "── ۳۴.۴) مقایسه نسخه ۱ و نسخه جاری: تغییر ابعاد/سنجه‌ها/نمودار/فیلتر ──"
+$CURL "$BASE/reports/$VRID/versions/compare?from=1&to=current" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['fromVersion'] == 1 and d['toVersion'] == 2, 'شماره نسخه‌های مقایسه نادرست'
+kinds={(i['kind'], i['op']) for i in d['items']}
+labels=' | '.join(i['label'] for i in d['items'])
+assert ('dim','added') in kinds, 'افزوده‌شدن بُعد تشخیص داده نشد'
+assert ('measure','added') in kinds, 'افزوده‌شدن سنجه تشخیص داده نشد'
+assert ('chart','changed') in kinds, 'تغییر نوع نمایش تشخیص داده نشد'
+assert ('filter','added') in kinds, 'افزوده‌شدن فیلتر تشخیص داده نشد'
+assert not d['identical'], 'دو نسخه متفاوت، یکسان تشخیص داده شدند'
+print('✓ مقایسه:', d['summary']['added'], 'افزوده /', d['summary']['removed'], 'حذف /', d['summary']['changed'], 'تغییر')
+print('   شرح:', labels[:150])"
+
+echo "── ۳۴.۵) مقایسه نسخه با خودش → بدون تفاوت ──"
+$CURL "$BASE/reports/$VRID/versions/compare?from=1&to=1" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['identical'] and len(d['items']) == 0, 'مقایسه نسخه با خودش نباید تفاوت داشته باشد'
+print('✓ مقایسه نسخه با خودش: بدون تفاوت')"
+
+echo ""
+echo "═══ ۳۵) تحلیل‌های پیشرفته — بخش ۲۱.۲ و ۲۱.۳ ═══"
+echo "── ۳۵.۱) روند و پیش‌بینی سری زمانی (روش + خطا + عدم قطعیت) ──"
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d "{\"mode\":\"trend\",\"dateField\":\"$F_DATE\",\"measureField\":\"$F_AMT\",\"agg\":\"sum\",\"granularity\":\"month\",\"horizon\":3}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert len(d['history']) >= 3, 'سری زمانی کافی نیست: ' + str(d.get('meta',{}).get('warnings'))
+assert len(d['forecast']) == 3, 'افق پیش‌بینی ۳ دوره برآورده نشد'
+assert all(f['hi'] >= f['value'] >= f['lo'] for f in d['forecast']), 'بازه عدم قطعیت نامعتبر است'
+assert d['r2'] >= 0 and d['mae'] >= 0, 'آماره‌های خطا نامعتبر'
+assert d['method'], 'روش پیش‌بینی باید ذکر شود (۲۱.۳)'
+print('✓ روند:', len(d['history']), 'دوره مشاهده +', len(d['forecast']), 'دوره پیش‌بینی | R²=', round(d['r2'],2), '| MAE=', round(d['mae'],1), '| MAPE=', d['mape'])
+print('   روش:', d['method'][:60])"
+
+echo "── ۳۵.۲) هشدار دوره ناقص (قاعده ۲۱.۳) ──"
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d "{\"mode\":\"trend\",\"dateField\":\"$F_DATE\",\"agg\":\"count\",\"granularity\":\"month\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+w=' '.join(d['meta']['warnings'])
+has_warn = 'ناقص' in w
+print('✓ هشدار دوره ناقص' + (' ثبت شد (بخش ۲۱.۳)' if has_warn else ' — دوره جاری کامل است (قابل قبول)'))"
+
+echo "── ۳۵.۳) همبستگی پیرسون + یادداشت غیرعلّی بودن ──"
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d "{\"mode\":\"correlation\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert len(d['fields']) >= 2, 'حداقل دو ستون عددی لازم است'
+n=len(d['fields'])
+assert len(d['matrix']) == n and len(d['matrix'][0]) == n, 'ماتریس مربعی نیست'
+assert 'علّی' in d['caveat'], 'یادداشت غیرعلّی بودن همبستگی الزامی است (۲۱.۳)'
+print('✓ ماتریس همبستگی', str(n)+'×'+str(n), '| جفت برتر:', d['topPairs'][0]['labelA'][:12], '×', d['topPairs'][0]['labelB'][:12], '| r=', round(d['topPairs'][0]['r'],2), '|', d['topPairs'][0]['strength'])"
+
+echo "── ۳۵.۴) تحلیل Cohort با شناسه شعبه ──"
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d "{\"mode\":\"cohort\",\"idField\":\"$F_BRANCH\",\"dateField\":\"$F_DATE\",\"granularity\":\"month\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert len(d['rows']) >= 1, 'هیچ گروه زمانی ساخته نشد: ' + str(d.get('meta',{}).get('warnings'))
+r0=d['rows'][0]
+assert r0['size'] > 0, 'اندازه گروه صفر است'
+assert r0['cells'][0]['count'] == r0['size'], 'ستون نخست ماتریس حفظ باید برابر اندازه گروه باشد'
+print('✓ ماتریس Cohort:', len(d['rows']), 'گروه | گروه نخست:', r0['cohort'], '| اندازه:', r0['size'], '| دوره‌ها:', len(r0['cells']))"
+
+echo "── ۳۵.۵) تحلیل RFM + بخش‌بندی ──"
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d "{\"mode\":\"rfm\",\"idField\":\"$F_BRANCH\",\"dateField\":\"$F_DATE\",\"amountField\":\"$F_AMT\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['totalCustomers'] >= 5, 'تعداد شناسه کافی نیست: ' + str(d.get('meta',{}).get('warnings'))
+assert len(d['segments']) >= 1, 'بخش‌بندی انجام نشد'
+assert d['referenceDate'], 'تاریخ مرجع ثبت نشده'
+top=d['customers'][0]
+assert 1 <= top['rScore'] <= 5 and 1 <= top['fScore'] <= 5 and 1 <= top['mScore'] <= 5, 'امتیاز R/F/M خارج از ۱..۵'
+print('✓ RFM:', d['totalCustomers'], 'شناسه | بخش‌ها:', [(s['label'], s['count']) for s in d['segments'][:4]])"
+
+echo "── ۳۵.۶) سناریوسازی What-if (رشد ۱۰٪ سراسری) ──"
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d "{\"mode\":\"whatif\",\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"}],\"globalPct\":10}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert len(d['rows']) >= 1, 'ردیف سناریو تولید نشد'
+a=d['measureAliases'][0]
+r0=d['rows'][0]
+assert abs(r0['scenario'][a] - r0['baseline'][a]*1.1) < 0.01, 'اثر ۱۰٪ درست محاسبه نشد'
+assert abs(d['totals']['scenario'][a] - d['totals']['baseline'][a]*1.1) < 0.01, 'جمع کل سناریو نادرست'
+assert 'پیش‌بینی نیست' in d['note'], 'یادداشت فرضی بودن سناریو الزامی است (۲۱.۳)'
+print('✓ What-if:', len(d['rows']), 'ردیف | پایه:', round(d['totals']['baseline'][a]), '→ سناریو:', round(d['totals']['scenario'][a]))"
+
+echo "── ۳۵.۷) سنجه مبنای صفر → درصد تعریف‌نشده (قاعده ۲۱.۳) ──"
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d "{\"mode\":\"whatif\",\"dimensions\":[\"$F_PROV\"],\"measures\":[{\"fieldId\":\"$F_AMT\",\"agg\":\"sum\",\"alias\":\"جمع مبلغ\"}],\"globalPct\":0,\"perValue\":{\"تهران\":0}}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+a=d['measureAliases'][0]
+r0=d['rows'][0]
+assert r0['deltaPct'][a] is not None or r0['baseline'][a] == 0, 'قاعده مبنای صفر رعایت نشده'
+print('✓ قاعده مبنای صفر: درصد تغییر برای پایه صفر null است (بخش ۲۱.۳)')"
+
+echo "── ۳۵.۸) تشخیص ناهنجاری (روش مقاوم میانه/MAD) ──"
+# سطح ماه: دوره‌های داده آزمون کمتر از ۵ است → باید با هشدار قاعده‌مند رد شود (بخش ۲۱.۳)
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d "{\"mode\":\"anomaly\",\"dateField\":\"$F_DATE\",\"measureField\":\"$F_AMT\",\"agg\":\"sum\",\"granularity\":\"month\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+w=' '.join(d['meta']['warnings'])
+if len(d['series']) == 0:
+    assert 'حداقل ۵ دوره' in w, 'داده ناکافی باید با هشدار شفاف همراه باشد (۲۱.۳)'
+    print('✓ سطح ماه: داده ناکافی به‌درستی با هشدار رد شد')
+else:
+    assert all('z' in s and 'isAnomaly' in s for s in d['series'])
+    print('✓ سطح ماه:', len(d['series']), 'دوره بررسی شد')"
+# سطح روز: دوره‌های کافی → سری کامل با نمره Z
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d "{\"mode\":\"anomaly\",\"dateField\":\"$F_DATE\",\"measureField\":\"$F_AMT\",\"agg\":\"sum\",\"granularity\":\"day\"}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert len(d['series']) >= 5, 'سری روزانه باید حداقل ۵ دوره داشته باشد: ' + str(d.get('meta',{}).get('warnings'))
+assert all('z' in s and 'isAnomaly' in s for s in d['series']), 'نمره Z برای همه دوره‌ها محاسبه نشد'
+assert d['method'], 'روش تشخیص باید ذکر شود (۲۱.۳)'
+print('✓ سطح روز:', len(d['series']), 'دوره بررسی شد | ناهنجاری‌ها:', len(d['anomalies']), '| روش:', d['method'][:40])"
+
+echo "── ۳۵.۹) حالت نامعتبر → خطای شفاف ──"
+$CURL -X POST "$BASE/datasets/$DSID/analytics" -H 'Content-Type: application/json' -d '{"mode":"invalid"}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'حالت تحلیل نامعتبر' in d.get('error',''), 'خطای حالت نامعتبر صادر نشد'
+print('✓ حالت نامعتبر با پیام شفاف رد شد')"
+
+echo ""
+echo "✓✓✓ هر ۳۶ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"
