@@ -1,0 +1,3 @@
+{
+  "/api/datasets/[id]/columns/route": "app/api/datasets/[id]/columns/route.js"
+}
