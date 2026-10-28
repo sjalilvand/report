@@ -14,13 +14,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
 import { formatNumber } from '@/lib/currency'
 import { Tip } from './HelpTip'
 import {
   Upload, FileSpreadsheet, Trash2, Database, AlertTriangle, CheckCircle2, FileDown,
-  Loader2, Table2, Eye, Layers, Info,
+  Loader2, Table2, Eye, Layers, Info, Combine, CheckCheck, XCircle,
 } from 'lucide-react'
 
 interface SheetInfo {
@@ -75,6 +76,77 @@ export default function DataView({
   const [datasetName, setDatasetName] = useState('')
   const { toast } = useToast()
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // ── تجمیع چند فایل هم‌فرم ──
+  const [selectedFiles, setSelectedFiles] = useState<Record<string, string>>({}) // fileId → sheetName
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [mergeCheck, setMergeCheck] = useState<null | {
+    allMatch: boolean
+    mismatch: { fileName: string; missing: string[]; extra: string[] }[]
+    perFile: { fileId: string; fileName: string; sheetName: string; headers: string[]; rowCount: number; headerRow: number; ok: boolean; message?: string }[]
+    totalRows: number
+    headers: string[]
+  }>(null)
+  const [mergeName, setMergeName] = useState('')
+  const [merging, setMerging] = useState(false)
+  const [checking, setChecking] = useState(false)
+
+  const selectedCount = Object.keys(selectedFiles).length
+  const toggleSelect = (f: ProjectFile, sheetName: string) => {
+    setSelectedFiles(prev => {
+      const next = { ...prev }
+      if (next[f.id]) delete next[f.id]
+      else next[f.id] = sheetName
+      return next
+    })
+  }
+  const openMergeDialog = async () => {
+    if (selectedCount < 2) return
+    setMergeOpen(true)
+    setChecking(true)
+    setMergeCheck(null)
+    try {
+      const res = await api.post<typeof mergeCheck & object>('/api/files/merge', {
+        projectId,
+        dryRun: true,
+        items: Object.entries(selectedFiles).map(([fileId, sheetName]) => ({ fileId, sheetName })),
+      })
+      setMergeCheck(res)
+    } catch (e) {
+      toast({ title: 'خطا در بررسی ساختار فایل‌ها', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+      setMergeOpen(false)
+    } finally {
+      setChecking(false)
+    }
+  }
+  const executeMerge = async () => {
+    setMerging(true)
+    try {
+      const res = await api.post<{ datasetId: string; rowCount: number; fieldCount: number; sourceCount: number; error?: string }>('/api/files/merge', {
+        projectId,
+        dryRun: false,
+        name: mergeName.trim() || undefined,
+        items: Object.entries(selectedFiles).map(([fileId, sheetName]) => ({ fileId, sheetName })),
+      })
+      if (res.error) {
+        toast({ title: 'تجمیع انجام نشد', description: res.error, variant: 'destructive' })
+        return
+      }
+      toast({
+        title: 'تجمیع کامل شد',
+        description: `${formatNumber(res.rowCount)} رکورد از ${formatNumber(res.sourceCount)} فایل در یک مجموعه‌داده یکپارچه شد؛ داشبورد هوشمند ساخته می‌شود.`,
+      })
+      setMergeOpen(false)
+      setSelectedFiles({})
+      setMergeCheck(null)
+      setMergeName('')
+      onDatasetCreated(res.datasetId)
+    } catch (e) {
+      toast({ title: 'خطا در تجمیع', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    } finally {
+      setMerging(false)
+    }
+  }
 
   const loadFiles = useCallback(async () => {
     try {
@@ -234,6 +306,12 @@ export default function DataView({
             <a href="/samples/۲-تراکنش‌های-فروش-آذر.xlsx" download className="text-xs font-medium text-primary hover:underline">تراکنش‌های فروش (دوره ۲)</a>
             <a href="/samples/۳-فهرست-مشتریان.xlsx" download className="text-xs font-medium text-primary hover:underline">مشتریان</a>
             <a href="/samples/۴-فهرست-محصولات.xlsx" download className="text-xs font-medium text-primary hover:underline">محصولات</a>
+            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+            <span className="text-[11px] text-muted-foreground">قالب‌های هوشمند:</span>
+            <a href="/samples/نمونه-فیش-حقوقی-مهر.xlsx" download className="text-xs font-medium text-primary hover:underline">فیش حقوقی (مهر)</a>
+            <a href="/samples/نمونه-فیش-حقوقی-آبان.xlsx" download className="text-xs font-medium text-primary hover:underline">فیش حقوقی (آبان)</a>
+            <a href="/samples/نمونه-صورت-مالی.xlsx" download className="text-xs font-medium text-primary hover:underline">صورت مالی</a>
+            <a href="/samples/نمونه-سود-محصولات.xlsx" download className="text-xs font-medium text-primary hover:underline">سود محصولات</a>
             <a href="/samples/سناریوی-آزمون.txt" download className="text-[11px] text-muted-foreground hover:underline">سناریوی آزمون</a>
           </div>
         </CardContent>
@@ -244,14 +322,41 @@ export default function DataView({
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base"><Layers className="size-4" /> فایل‌های پروژه «{activeProjectName}»</CardTitle>
+            <CardDescription>
+              برای تجمیع چند فایل هم‌فرم (مثلاً فیش حقوقی چند ماه)، فایل‌ها را تیک بزنید و دکمه «تجمیع» را بزنید — ساختار فایل‌ها به‌صورت خودکار مقایسه می‌شود
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {selectedCount >= 2 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/40 bg-primary/5 px-4 py-3">
+                <p className="flex items-center gap-2 text-sm">
+                  <Combine className="size-4 text-primary" />
+                  <span>{formatNumber(selectedCount)} فایل برای تجمیع انتخاب شده است</span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setSelectedFiles({})}>لغو انتخاب</Button>
+                  <Tip label="بررسی هم‌فرم بودن فایل‌ها و ساخت یک مجموعه‌داده یکپارچه + داشبورد و گزارش هوشمند">
+                    <Button size="sm" className="gap-1.5" onClick={openMergeDialog} disabled={checking}>
+                      {checking ? <Loader2 className="size-4 animate-spin" /> : <Combine className="size-4" />}
+                      تجمیع و ساخت داشبورد
+                    </Button>
+                  </Tip>
+                </div>
+              </div>
+            )}
             {files.map(f => {
               const sheets: SheetInfo[] = JSON.parse(f.sheetInfo || '[]')
+              const isSelected = !!selectedFiles[f.id]
               return (
-                <div key={f.id} className="rounded-lg border p-4 space-y-3">
+                <div key={f.id} className={`rounded-lg border p-4 space-y-3 ${isSelected ? 'border-primary bg-primary/5' : ''}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => toggleSelect(f, sheets[0]?.name ?? '')}
+                        aria-label={`انتخاب ${f.name} برای تجمیع`}
+                        className="shrink-0"
+                      />
                       <FileSpreadsheet className="size-5 text-emerald-600 shrink-0" />
                       <div className="min-w-0">
                         <p className="font-medium truncate">{f.name}</p>
@@ -273,6 +378,16 @@ export default function DataView({
                         {s.mergedCells > 0 && <AlertTriangle className="size-3.5 text-amber-500" />}
                       </Button>
                     ))}
+                    {isSelected && sheets.length > 1 && (
+                      <div className="w-44">
+                        <Select value={selectedFiles[f.id] ?? sheets[0]?.name} onValueChange={v => setSelectedFiles(prev => ({ ...prev, [f.id]: v }))}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="شیت برای تجمیع" /></SelectTrigger>
+                          <SelectContent>
+                            {sheets.map(s => <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
                 </div>
               )
@@ -416,6 +531,94 @@ export default function DataView({
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* گفت‌وگوی تجمیع چند فایل هم‌فرم */}
+      <Dialog open={mergeOpen} onOpenChange={o => { if (!o) { setMergeOpen(false); setMergeCheck(null) } }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Combine className="size-4 text-primary" /> تجمیع فایل‌های هم‌فرم</DialogTitle>
+            <DialogDescription>
+              ساختار فایل‌های انتخابی مقایسه می‌شود؛ اگر همه هم‌فرم باشند، رکوردها در یک مجموعه‌داده یکپارچه می‌شوند و ستون «فایل مبدأ» افزوده می‌گردد.
+            </DialogDescription>
+          </DialogHeader>
+          {checking ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> در حال مقایسه ساختار فایل‌ها…
+            </div>
+          ) : mergeCheck ? (
+            <div className="flex flex-col gap-4 overflow-hidden">
+              {mergeCheck.allMatch ? (
+                <Alert className="border-emerald-500/40 bg-emerald-500/5">
+                  <CheckCheck className="size-4 text-emerald-600" />
+                  <AlertTitle className="text-sm">ساختار همه فایل‌ها هم‌فرم است</AlertTitle>
+                  <AlertDescription className="text-xs">
+                    جمعاً {formatNumber(mergeCheck.totalRows)} رکورد از {formatNumber(mergeCheck.perFile.filter(p => p.ok).length)} فایل تجمیع خواهد شد ({formatNumber(mergeCheck.headers.length)} ستون + ستون «فایل مبدأ»).
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="destructive">
+                  <XCircle className="size-4" />
+                  <AlertTitle className="text-sm">ساختار فایل‌ها یکسان نیست</AlertTitle>
+                  <AlertDescription>
+                    <ul className="list-disc ps-4 space-y-1 text-xs">
+                      {mergeCheck.mismatch.map((m, i) => (
+                        <li key={i}>
+                          «{m.fileName}»:
+                          {m.missing.length > 0 && <span> ستون‌های جاافتاده: {m.missing.join('، ')}</span>}
+                          {m.extra.length > 0 && <span>{m.missing.length > 0 ? ' | ' : ''}ستون‌های اضافه: {m.extra.join('، ')}</span>}
+                        </li>
+                      ))}
+                      {mergeCheck.perFile.filter(p => !p.ok).map(p => <li key={p.fileId}>«{p.fileName}»: {p.message}</li>)}
+                    </ul>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <div className="min-h-0 flex-1">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">فایل</TableHead>
+                      <TableHead className="text-xs">شیت</TableHead>
+                      <TableHead className="text-xs">ستون‌های شناسایی‌شده</TableHead>
+                      <TableHead className="text-xs">رکورد</TableHead>
+                      <TableHead className="text-xs">وضعیت</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {mergeCheck.perFile.map(p => (
+                      <TableRow key={p.fileId}>
+                        <TableCell className="text-xs max-w-40 truncate">{p.fileName}</TableCell>
+                        <TableCell className="text-xs">{p.sheetName}</TableCell>
+                        <TableCell className="text-xs max-w-72 truncate text-muted-foreground">{p.headers.join('، ')}</TableCell>
+                        <TableCell className="text-xs">{formatNumber(p.rowCount)}</TableCell>
+                        <TableCell>
+                          {p.ok ? <Badge className="gap-1 bg-emerald-600"><CheckCircle2 className="size-3" /> آماده</Badge> : <Badge variant="destructive" className="gap-1"><XCircle className="size-3" /> نامعتبر</Badge>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {mergeCheck.allMatch && (
+                <div className="space-y-1.5">
+                  <Label>نام مجموعه‌داده تجمیع‌شده</Label>
+                  <Input value={mergeName} onChange={e => setMergeName(e.target.value)} placeholder={`تجمیع ${formatNumber(mergeCheck.perFile.filter(p => p.ok).length)} فایل`} />
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pb-2">
+                <Button variant="outline" onClick={() => { setMergeOpen(false); setMergeCheck(null) }}>انصراف</Button>
+                <Button onClick={executeMerge} disabled={merging || checking || !mergeCheck.allMatch} className="gap-2">
+                  {merging ? <Loader2 className="size-4 animate-spin" /> : <Combine className="size-4" />}
+                  تجمیع و ساخت داشبورد هوشمند
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

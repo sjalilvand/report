@@ -99,6 +99,7 @@ export interface AutoDashLayout {
   hiddenSections?: ('trend' | 'breakdowns' | 'insights' | 'summary')[]
   chartTypes?: Record<string, 'area' | 'bar' | 'pie'> // برای روند و هر تفکیک
   topLimit?: number // تعداد دسته‌های برتر در هر تفکیک (۵ تا ۱۵)
+  hiddenTemplates?: string[] // مخفی‌سازی تحلیل تخصصی قالب هوشمند (payslip/financial/profit)
 }
 
 const MEASURE_TYPES = ['amount', 'integer', 'decimal']
@@ -563,6 +564,7 @@ export function sanitizeLayout(input: unknown): AutoDashLayout {
   if (Array.isArray(l.hiddenBreakdowns)) out.hiddenBreakdowns = l.hiddenBreakdowns.filter(x => typeof x === 'string').slice(0, 30)
   if (Array.isArray(l.breakdownOrder)) out.breakdownOrder = l.breakdownOrder.filter(x => typeof x === 'string').slice(0, 30)
   if (Array.isArray(l.hiddenSections)) out.hiddenSections = l.hiddenSections.filter(x => ['trend', 'breakdowns', 'insights', 'summary'].includes(x)).slice(0, 4)
+  if (Array.isArray(l.hiddenTemplates)) out.hiddenTemplates = l.hiddenTemplates.filter(x => typeof x === 'string' && ['payslip', 'financial', 'profit'].includes(x)).slice(0, 3)
   if (l.chartTypes && typeof l.chartTypes === 'object' && !Array.isArray(l.chartTypes)) {
     const ct: Record<string, 'area' | 'bar' | 'pie'> = {}
     for (const [k, v] of Object.entries(l.chartTypes)) {

@@ -8,6 +8,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { api } from '@/lib/client'
 import { formatNumber } from '@/lib/currency'
 import type { AutoDash, AutoDashLayout, AutoDashKpi, AutoDashBreakdown } from '@/lib/autodash'
+import type { SmartAnalysis } from '@/lib/smarttemplates'
+import SmartTemplatePanel from '@/components/SmartTemplatePanel'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -21,7 +23,7 @@ import { Tip } from '@/components/HelpTip'
 import {
   LayoutDashboard, RefreshCw, Pencil, Save, RotateCcw, Eye, EyeOff, ArrowUp, ArrowDown,
   Trophy, TrendingUp, TrendingDown, Minus, PieChart as PieIcon, ShieldCheck, CalendarDays,
-  Sparkles, Loader2, Table2, BarChart3, Lightbulb, Layers, Users, Info, AlertTriangle,
+  Sparkles, Loader2, Table2, BarChart3, Lightbulb, Layers, Users, Info, AlertTriangle, BadgeCheck,
 } from 'lucide-react'
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -67,7 +69,7 @@ const INSIGHT_ICON = {
 } as const
 
 type ChartKind = 'area' | 'bar' | 'pie'
-type DashTab = 'overview' | 'trend' | 'breakdown' | 'insights' | 'table'
+type DashTab = 'overview' | 'trend' | 'breakdown' | 'insights' | 'table' | 'smart'
 
 // ────────────────────────── اعمال چیدمان روی داشبورد خام (سمت کلاینت) ──────────────────────────
 function applyClientLayout(raw: AutoDash, l: AutoDashLayout): AutoDash {
@@ -260,6 +262,8 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
   const [error, setError] = useState('')
   const [editMode, setEditMode] = useState(false)
   const [tab, setTab] = useState<DashTab>('overview')
+  // تحلیل تخصصی قالب هوشمند — فیش حقوقی / صورت مالی / سود
+  const [smart, setSmart] = useState<{ analysis: SmartAnalysis; confidence: number; matchedSignals: string[] } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -278,6 +282,18 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
   }, [datasetId])
 
   useEffect(() => { load() }, [load])
+
+  // دریافت تحلیل تخصصی قالب هوشمند — موازی با داشبورد، خطای آن تحلیل اصلی را مختل نمی‌کند
+  useEffect(() => {
+    let alive = true
+    api.get<{ template: string | null; confidence?: number; matchedSignals?: string[]; analysis?: SmartAnalysis }>(`/api/datasets/${datasetId}/smart`)
+      .then(res => {
+        if (alive && res.template && res.analysis) setSmart({ analysis: res.analysis, confidence: res.confidence ?? 0, matchedSignals: res.matchedSignals ?? [] })
+        else if (alive) setSmart(null)
+      })
+      .catch(() => { if (alive) setSmart(null) })
+    return () => { alive = false }
+  }, [datasetId])
 
   const dash = useMemo(() => (raw ? applyClientLayout(raw, layout) : null), [raw, layout])
   const dirty = useMemo(() => JSON.stringify(layout) !== JSON.stringify(savedLayout), [layout, savedLayout])
@@ -307,6 +323,26 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
     const cur = layout.hiddenSections ?? []
     patchLayout({ hiddenSections: cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s] })
   }
+  // مخفی‌سازی/نمایش تحلیل تخصصی قالب هوشمند — بلافاصله در چیدمان ذخیره می‌شود
+  const smartTemplate = smart?.analysis.template ?? null
+  const smartHidden = smartTemplate ? (layout.hiddenTemplates ?? []).includes(smartTemplate) : false
+  const toggleSmart = async () => {
+    if (!smartTemplate) return
+    const cur = layout.hiddenTemplates ?? []
+    const next = cur.includes(smartTemplate) ? cur.filter(x => x !== smartTemplate) : [...cur, smartTemplate]
+    const newLayout = { ...layout, hiddenTemplates: next }
+    setLayout(newLayout)
+    try {
+      await api.put(`/api/datasets/${datasetId}/autodash`, { layout: newLayout })
+      setSavedLayout(newLayout)
+    } catch {
+      setError('ذخیره تغییر تحلیل تخصصی ناموفق بود')
+    }
+  }
+  // تجربه هوشمند: با نخستین شناسایی قالب، کاربر مستقیماً به تب تحلیل تخصصی هدایت می‌شود
+  useEffect(() => {
+    if (smart && !smartHidden) setTab(t => (t === 'overview' ? 'smart' : t))
+  }, [smart?.analysis.template])
 
   const saveLayout = async () => {
     setSaving(true)
@@ -405,6 +441,12 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
             حالت ویرایش فعال است: روی هر کارت دکمه‌های مخفی‌سازی و جابه‌جایی ظاهر شده و نوع نمودارها قابل تغییر است. پس از پایان، «ذخیره چیدمان» را بزنید.
           </p>
         ) : null}
+        {smart && !smartHidden ? (
+          <Badge className="mt-2 gap-1 border border-primary/30 bg-primary/10 text-primary">
+            <BadgeCheck className="size-3" />
+            قالب «{smart.analysis.templateLabel}» شناسایی شد — تحلیل تخصصی در تب «تحلیل تخصصی» آماده است
+          </Badge>
+        ) : null}
         {error ? <p className="mt-2 rounded-lg bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive">{error}</p> : null}
       </div>
 
@@ -427,6 +469,7 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
           {!isHidden('breakdowns') ? <TabsTrigger value="breakdown" className="gap-1.5 text-xs" disabled={dash.breakdowns.length === 0}><Layers className="size-3.5" /> تفکیک و ترکیب</TabsTrigger> : null}
           {!isHidden('insights') ? <TabsTrigger value="insights" className="gap-1.5 text-xs" disabled={dash.insights.length === 0}><Lightbulb className="size-3.5" /> بینش‌های خودکار</TabsTrigger> : null}
           {!isHidden('summary') ? <TabsTrigger value="table" className="gap-1.5 text-xs" disabled={!dash.summary}><Table2 className="size-3.5" /> جدول خلاصه</TabsTrigger> : null}
+          {smart && !smartHidden ? <TabsTrigger value="smart" className="gap-1.5 border border-primary/30 text-xs" ><Sparkles className="size-3.5" /> تحلیل تخصصی: {smart.analysis.templateLabel}</TabsTrigger> : null}
         </TabsList>
 
         {/* ── نمای کلی: KPI + روند + دونات + بینش‌های برتر ── */}
@@ -648,6 +691,18 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
             <Alert><Info className="size-4" /><AlertTitle className="text-sm">جدول خلاصه در دسترس نیست</AlertTitle><AlertDescription className="text-xs">برای جدول خلاصه، یک ستون دسته‌بندی و یک ستون عددی لازم است.</AlertDescription></Alert>
           )}
           {editMode && dash.summary ? <SectionHideToggle id="summary" hidden={isHidden('summary')} onToggle={() => toggleSection('summary')} label="کل بخش جدول خلاصه" /> : null}
+        </TabsContent>
+
+        {/* ── تحلیل تخصصی قالب هوشمند: فیش حقوقی / صورت مالی / سود ── */}
+        <TabsContent value="smart" className="space-y-4">
+          {smart ? (
+            <SmartTemplatePanel
+              analysis={smart.analysis}
+              confidence={smart.confidence}
+              matchedSignals={smart.matchedSignals}
+              onHide={canEdit ? toggleSmart : undefined}
+            />
+          ) : null}
         </TabsContent>
       </Tabs>
 

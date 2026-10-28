@@ -165,6 +165,21 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: (u: AppUser) => 
                 <Button type="submit" className="w-full gap-2" disabled={busy || !username || !password}>
                   <LogIn className="size-4" /> {busy ? 'در حال ورود…' : 'ورود به سامانه'}
                 </Button>
+
+                {/* بازیابی گذرواژه — بازنشانی توسط مدیر یا اسکریپت رسمی (بخش ۲۹ سند) */}
+                {!firstRun && (
+                  <details className="rounded-lg border bg-muted/30 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
+                    <summary className="cursor-pointer select-none text-xs font-medium text-foreground">
+                      گذرواژه را فراموش کرده‌اید؟
+                    </summary>
+                    <div className="mt-2 space-y-1.5">
+                      <p>۱) مدیر سامانه می‌تواند از بخش «مدیریت کاربران» گذرواژه شما را بازنشانی کند.</p>
+                      <p>۲) اگر خودتان مدیر هستید و دسترسی قطع شده، روی سرورِ برنامه در پوشه پروژه این دستور را اجرا کنید:</p>
+                      <code className="block rounded bg-background px-2 py-1 font-mono text-[10px] text-primary" dir="ltr">.\scripts\reset-password.ps1</code>
+                      <p>پس از اجرا، گذرواژه مدیر به <span className="font-medium">Admin@1404</span> بازنشانی می‌شود (بعد از ورود آن را تغییر دهید).</p>
+                    </div>
+                  </details>
+                )}
               </form>
 
               {/* ورود یکپارچه سازمانی — بخش ۲۹ سند */}
