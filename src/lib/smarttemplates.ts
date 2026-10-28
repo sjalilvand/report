@@ -156,7 +156,7 @@ export function detectSmartTemplate(records: DataRow[], fields: FieldMeta[]): Sm
       if (amountField) {
         finConf = Math.min(1, 0.55 + hitCount / Math.max(8, uniq.length) * 0.4)
         finSignals.push(`اقلام صورت مالی در ستون «${tf.label}» شناسایی شد (${hitCount} قلم)`)
-        finSt = { mode: 'long', itemField: tf, amountField, periodField: fields.find(f => normText(f.label).match(/سال|دوره|ماه/)) }
+        finSt = { mode: 'long', itemField: tf, amountField, periodField: fields.find(f => normText(f.label).match(/سال|دوره|ماه/)), fieldItems: [] }
         break
       }
     }
@@ -189,11 +189,11 @@ export function detectSmartTemplate(records: DataRow[], fields: FieldMeta[]): Sm
   if (!pr.revenue || !pr.cost) prConf *= 0.4
 
   // انتخاب بهترین قالب — فیش حقوقی و صورت مالی اختصاصی‌ترند و اولویت دارند
-  const candidates: { kind: SmartTemplateKind; conf: number; signals: string[] }[] = [
+  const candidates = ([
     { kind: 'payslip', conf: payConf, signals: paySignals },
     { kind: 'financial', conf: finConf, signals: finSignals },
     { kind: 'profit', conf: prConf, signals: prSignals },
-  ].sort((a, b) => b.conf - a.conf)
+  ] as { kind: SmartTemplateKind; conf: number; signals: string[] }[]).sort((a, b) => b.conf - a.conf)
 
   const best = candidates[0]
   if (!best || best.conf < 0.45) {
@@ -227,7 +227,7 @@ export function buildSmartAnalysis(template: SmartTemplateKind, records: DataRow
             for (const r of records.slice(0, 500)) { const v = num(r[f.id]); if (v !== null) s += Math.abs(v) }
             return { f, s }
           }).sort((a, b) => b.s - a.s)[0]?.f
-          if (amountField) { st = { mode: 'long', itemField: tf, amountField, periodField: fields.find(f => normText(f.label).match(/سال|دوره|ماه/)) }; break }
+          if (amountField) { st = { mode: 'long', itemField: tf, amountField, periodField: fields.find(f => normText(f.label).match(/سال|دوره|ماه/)), fieldItems: [] }; break }
         }
       }
       if (st.mode === 'wide') {

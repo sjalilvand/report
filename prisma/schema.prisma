@@ -124,6 +124,8 @@ model Report {
   status      String   @default("draft") // draft | pending | approved | published | rejected — گردش کار تأیید بخش ۲۶.۱
   createdBy   String?
   publishedAt DateTime?
+  shareToken  String?   @unique // لینک اشتراک عمومی گزارش منتشرشده — بخش «انتشار» فاز ۱۶
+  sharedAt    DateTime?
   version     Int      @default(1)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

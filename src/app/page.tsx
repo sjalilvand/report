@@ -925,6 +925,8 @@ export default function Home() {
                   datasetName={detail.name}
                   canEdit={true}
                   onDatasetEdited={refreshDetail}
+                  projectId={project?.id}
+                  userRole={user?.role}
                 />
               </div>
             )}

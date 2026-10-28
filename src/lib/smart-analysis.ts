@@ -79,7 +79,7 @@ export function topInsightLabel(rows: { label: string; value: number }[]): { top
 
 // ─────────────────────────── فیش حقوقی ───────────────────────────
 
-interface PayRoles {
+export interface PayRoles {
   employee?: FieldMeta; unit?: FieldMeta; period?: FieldMeta
   base?: FieldMeta; overtime?: FieldMeta; benefit?: FieldMeta; gross?: FieldMeta
   net?: FieldMeta; deduction?: FieldMeta; insurance?: FieldMeta; tax?: FieldMeta
@@ -179,7 +179,7 @@ export function buildPayslipAnalysis(records: DataRow[], _fields: FieldMeta[], r
       .filter(a => a.value !== 0)
       .sort((a, b) => b.value - a.value)
     if (agg.length >= 2) {
-      charts.push({ id: 'ps-unit', title: `خالص پرداختی بر اساس ${roles.unit.label}`, kind: 'bar', data: agg.slice(0, 10), seriesKey: 'خالص پرداختی' })
+      charts.push({ id: 'ps-unit', title: `خالص پرداختی بر اساس ${roles.unit.label}`, kind: 'bar', data: agg.map(a => ({ name: a.label, value: a.value })), seriesKey: 'خالص پرداختی' })
       const total = agg.reduce((s, a) => s + a.value, 0)
       if (total > 0 && agg.length >= 3 && agg.slice(0, 2).reduce((s, a) => s + a.value, 0) / total > 0.6) {
         insights.push({
@@ -306,7 +306,7 @@ export function matchFinItem(raw: string): FinItemDef | null {
   return null
 }
 
-interface FinStructure {
+export interface FinStructure {
   mode: 'long' | 'wide'
   itemField?: FieldMeta     // حالت طولی: ستون شرح اقلام
   amountField?: FieldMeta   // حالت طولی: ستون مبلغ

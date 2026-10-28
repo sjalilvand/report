@@ -28,7 +28,7 @@ import {
   Save, FileDown, FileText, Grid3X3, X, Plus, Kanban, BookMarked, LayoutDashboard,
   TableProperties, ChevronDown, ZoomIn, RotateCcw, Crosshair, Layers, Link2,
   Combine, Activity, Flame, Boxes, TrendingUp, Filter, LayoutGrid, Presentation, ListTodo,
-  MapPin, Scale, Sparkles, ArrowUpRight, ArrowDownRight, Target, ShieldCheck, Info,
+  MapPin, Scale, Sparkles, ArrowUpRight, ArrowDownRight, Target, ShieldCheck, Info, Zap,
 } from 'lucide-react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -592,6 +592,64 @@ export default function ReportBuilder({
       toast({ title: 'خطا در پیشنهاد هوشمند', description: e instanceof Error ? e.message : '', variant: 'destructive' })
     } finally {
       setAiSuggestLoading(false)
+    }
+  }
+
+  // شروع سریع گزارش‌ساز — یک‌کلیکی: جدول خلاصه، نمودار تفکیکی، روند زمانی، کارت شاخص
+  // گزارش‌سازی را برای کاربری که با مفاهیم بُعد/سنجه آشنا نیست، بدون پیکربندی دستی ممکن می‌کند
+  const QUICK_TITLE: Record<'summary' | 'breakdown' | 'trend' | 'kpi', string> = {
+    summary: 'گزارش خلاصه اجرا شد', breakdown: 'نمودار تفکیکی اجرا شد', trend: 'روند زمانی اجرا شد', kpi: 'کارت شاخص اجرا شد',
+  }
+  const quickStart = async (kind: 'summary' | 'breakdown' | 'trend' | 'kpi') => {
+    if (!dataset) return
+    const measureFields = fields.filter(f => ['amount', 'integer', 'decimal'].includes(f.type) || f.role === 'measure')
+    const dimFields = fields.filter(f => !measureFields.includes(f) && f.type !== 'date' && ['text', 'category', 'boolean', 'geo', 'identifier'].includes(f.type))
+    const dateField = fields.find(f => f.type === 'date')
+    const firstM = measureFields[0]
+    let dims: string[] = []
+    let ms: { fieldId?: string; agg: string }[] = []
+    let type: ChartType = 'table'
+    if (kind === 'kpi') {
+      ms = measureFields.slice(0, 3).map(m => ({ fieldId: m.id, agg: 'sum' }))
+      if (ms.length === 0) ms = [{ agg: 'count' }]
+      type = 'kpi'
+    } else if (kind === 'trend') {
+      if (!dateField) {
+        toast({ title: 'روند زمانی به ستون تاریخ نیاز دارد', description: 'در گام «ستون‌ها» نوع ستون تاریخ را تأیید کنید و دوباره تلاش کنید.', variant: 'destructive' })
+        return
+      }
+      dims = [dateField.id]
+      ms = firstM ? [{ fieldId: firstM.id, agg: 'sum' }] : [{ agg: 'count' }]
+      type = 'line'
+    } else {
+      dims = dimFields[0] ? [dimFields[0].id] : []
+      ms = firstM ? [{ fieldId: firstM.id, agg: 'sum' }] : [{ agg: 'count' }]
+      type = kind === 'breakdown' ? 'bar' : 'table'
+    }
+    setSelDims(dims)
+    setSelMeasures(ms)
+    setChartType(type)
+    setLoading(true)
+    try {
+      const res = await api.post<QueryResp>(`/api/datasets/${dataset.id}/query`, {
+        dimensions: dims,
+        measures: ms.map(m => ({ ...m, alias: aliasOf(m) })),
+        filters: userFilters(),
+        relationFilters: relationFilters(),
+        descriptive: false,
+        dateField: dateField?.id,
+      })
+      setResult(res)
+      setPivotResult(null)
+      setDashData(null)
+      toast({
+        title: QUICK_TITLE[kind],
+        description: 'پیکربندی خودکار اعمال شد — ستون‌ها، فیلترها یا نوع نمایش را تغییر دهید و «اجرای گزارش» را دوباره بزنید.',
+      })
+    } catch (e) {
+      toast({ title: 'خطا', description: e instanceof Error ? e.message : '', variant: 'destructive' })
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -1341,6 +1399,23 @@ export default function ReportBuilder({
                   </Button>
                 </Tip>
               </div>
+            </div>
+            {/* شروع سریع گزارش‌ساز — یک‌کلیکی بدون پیکربندی دستی */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-primary/30 bg-primary/5 px-2.5 py-1.5">
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-primary"><Zap className="size-3" /> شروع سریع:</span>
+              <Tip label="جدول جمع به تفکیک اولین بُعد و سنجه اصلی — نقطه شروع خوب برای هر داده" side="bottom">
+                <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px]" onClick={() => quickStart('summary')} disabled={loading}><Table2 className="size-3" /> جدول خلاصه</Button>
+              </Tip>
+              <Tip label="نمودار میله‌ای سهم دسته‌ها از سنجه اصلی" side="bottom">
+                <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px]" onClick={() => quickStart('breakdown')} disabled={loading}><BarChart3 className="size-3" /> نمودار تفکیکی</Button>
+              </Tip>
+              <Tip label="نمودار خطی سنجه اصلی در طول زمان (نیازمند ستون تاریخ)" side="bottom">
+                <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px]" onClick={() => quickStart('trend')} disabled={loading}><LineChartIcon className="size-3" /> روند زمانی</Button>
+              </Tip>
+              <Tip label="کارت‌های شاخص جمع مهم‌ترین سنجه‌ها" side="bottom">
+                <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px]" onClick={() => quickStart('kpi')} disabled={loading}><Kanban className="size-3" /> کارت شاخص</Button>
+              </Tip>
+              <span className="text-[10px] text-muted-foreground">یک کلیک — پیکربندی خودکار بر اساس ستون‌های مجموعه‌داده</span>
             </div>
             <CardDescription>
               نوع تجمیع، واحد و فیلتر هر شاخص قابل مشاهده است — شفافیت محاسبات (بخش ۴ سند)

@@ -14,16 +14,21 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tip } from '@/components/HelpTip'
+import SmartReportView from '@/components/SmartReportView'
 import {
   LayoutDashboard, RefreshCw, Pencil, Save, RotateCcw, Eye, EyeOff, ArrowUp, ArrowDown,
   Trophy, TrendingUp, TrendingDown, Minus, PieChart as PieIcon, ShieldCheck, CalendarDays,
   Sparkles, Loader2, Table2, BarChart3, Lightbulb, Layers, Users, Info, AlertTriangle, BadgeCheck,
+  FileText, FileCode2, Link2, Copy, CheckCircle2, Share2,
 } from 'lucide-react'
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -69,7 +74,11 @@ const INSIGHT_ICON = {
 } as const
 
 type ChartKind = 'area' | 'bar' | 'pie'
-type DashTab = 'overview' | 'trend' | 'breakdown' | 'insights' | 'table' | 'smart'
+type DashTab = 'overview' | 'trend' | 'breakdown' | 'insights' | 'table' | 'smart' | 'report'
+
+const STATUS_FA: Record<string, string> = {
+  draft: 'پیش‌نویس', pending: 'در انتظار تأیید', approved: 'تأییدشده', published: 'منتشرشده', rejected: 'ردشده',
+}
 
 // ────────────────────────── اعمال چیدمان روی داشبورد خام (سمت کلاینت) ──────────────────────────
 function applyClientLayout(raw: AutoDash, l: AutoDashLayout): AutoDash {
@@ -248,15 +257,19 @@ function BreakdownChart({ bd, kind }: { bd: AutoDashBreakdown; kind: ChartKind }
 }
 
 // ────────────────────────── نمای اصلی ──────────────────────────
-export default function AutoDashboardView({ datasetId, datasetName, canEdit, onDatasetEdited }: {
+export default function AutoDashboardView({ datasetId, datasetName, canEdit, onDatasetEdited, projectId, userRole }: {
   datasetId: string
   datasetName: string
   canEdit: boolean
   onDatasetEdited?: () => void
+  projectId?: string // برای ذخیره داشبورد به‌عنوان گزارش پروژه
+  userRole?: string // برای نمایش گزینه‌های گردش کار (ارسال/انتشار فوری)
 }) {
   const [raw, setRaw] = useState<AutoDash | null>(null)
   const [layout, setLayout] = useState<AutoDashLayout>({})
   const [savedLayout, setSavedLayout] = useState<AutoDashLayout>({})
+  const [dataVersion, setDataVersion] = useState(0)
+  const [columnCount, setColumnCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -264,16 +277,27 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
   const [tab, setTab] = useState<DashTab>('overview')
   // تحلیل تخصصی قالب هوشمند — فیش حقوقی / صورت مالی / سود
   const [smart, setSmart] = useState<{ analysis: SmartAnalysis; confidence: number; matchedSignals: string[] } | null>(null)
+  // ذخیره به‌عنوان گزارش + صدور لینک عمومی — «امکان ذخیره کردن و انتشار»
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [saveTitle, setSaveTitle] = useState('')
+  const [saveSubmit, setSaveSubmit] = useState(false)
+  const [savePublish, setSavePublish] = useState(false)
+  const [savingReport, setSavingReport] = useState(false)
+  const [savedInfo, setSavedInfo] = useState<{ id: string; title: string; status: string; version: number; created: boolean } | null>(null)
+  const [sharePath, setSharePath] = useState<string | null>(null)
+  const [shareLoading, setShareLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const res = await api.get<{ dashboard: AutoDash; raw: AutoDash; layout: AutoDashLayout | null }>(`/api/datasets/${datasetId}/autodash`)
+      const res = await api.get<{ dashboard: AutoDash; raw: AutoDash; layout: AutoDashLayout | null; dataVersion?: number; columnCount?: number }>(`/api/datasets/${datasetId}/autodash`)
       setRaw(res.raw ?? res.dashboard)
       const l = res.layout ?? {}
       setLayout(l)
       setSavedLayout(l)
+      setDataVersion(res.dataVersion ?? 0)
+      setColumnCount(res.columnCount ?? 0)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'خطا در ساخت داشبورد')
     } finally {
@@ -371,6 +395,44 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
     }
   }
 
+  // ── ذخیره به‌عنوان گزارش + لینک عمومی ──
+  const canSubmitReport = userRole ? ['admin', 'steward', 'analyst'].includes(userRole) : false
+  const canPublishReport = userRole === 'admin'
+
+  const saveAsReport = async () => {
+    if (!projectId) return
+    setSavingReport(true)
+    setError('')
+    try {
+      const res = await api.post<{ report: { id: string; title: string; status: string; version: number }; created: boolean; status: string }>(`/api/datasets/${datasetId}/autodash/save`, {
+        projectId,
+        title: saveTitle.trim(),
+        submit: saveSubmit,
+        publish: savePublish,
+        layout,
+      })
+      setSavedInfo({ id: res.report.id, title: res.report.title, status: res.report.status, version: res.report.version, created: res.created })
+      setSharePath(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'خطا در ذخیره گزارش')
+    } finally {
+      setSavingReport(false)
+    }
+  }
+
+  const issueShareLink = async () => {
+    if (!savedInfo) return
+    setShareLoading(true)
+    try {
+      const res = await api.post<{ enabled: boolean; sharePath: string | null }>(`/api/reports/${savedInfo.id}/share`, { enabled: true })
+      setSharePath(res.sharePath)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'خطا در صدور لینک عمومی')
+    } finally {
+      setShareLoading(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -414,6 +476,18 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
             <Tip label="محاسبه مجدد داشبورد با آخرین نسخه داده و ستون‌ها" side="bottom">
               <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={load} disabled={loading}><RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} /> بازسازی</Button>
             </Tip>
+            <Tip label="دانلود گزارش هوشمند مستقل (فایل HTML خودبسنده) — دقیقاً مشابه نمونه‌های ارسالی شما، قابل بازشدن در هر مرورگر و چاپ" side="bottom">
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs" asChild>
+                <a href={`/api/datasets/${datasetId}/smart-report?download=1`}><FileCode2 className="size-3.5" /> خروجی HTML</a>
+              </Button>
+            </Tip>
+            {projectId ? (
+              <Tip label="ذخیره این داشبورد هوشمند به‌عنوان گزارش پروژه — با نسخه‌بندی، انتشار و لینک عمومی" side="bottom">
+                <Button variant="outline" size="sm" className="gap-1.5 border-emerald-500/40 text-xs text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300" onClick={() => { setSaveTitle(dash.title); setSavedInfo(null); setSharePath(null); setSaveSubmit(false); setSavePublish(false); setSaveOpen(true) }}>
+                  <Share2 className="size-3.5" /> ذخیره به‌عنوان گزارش
+                </Button>
+              </Tip>
+            ) : null}
             {canEdit ? (
               editMode ? (
                 <>
@@ -469,6 +543,7 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
           {!isHidden('breakdowns') ? <TabsTrigger value="breakdown" className="gap-1.5 text-xs" disabled={dash.breakdowns.length === 0}><Layers className="size-3.5" /> تفکیک و ترکیب</TabsTrigger> : null}
           {!isHidden('insights') ? <TabsTrigger value="insights" className="gap-1.5 text-xs" disabled={dash.insights.length === 0}><Lightbulb className="size-3.5" /> بینش‌های خودکار</TabsTrigger> : null}
           {!isHidden('summary') ? <TabsTrigger value="table" className="gap-1.5 text-xs" disabled={!dash.summary}><Table2 className="size-3.5" /> جدول خلاصه</TabsTrigger> : null}
+          <TabsTrigger value="report" className="gap-1.5 text-xs"><FileText className="size-3.5" /> گزارش چاپی</TabsTrigger>
           {smart && !smartHidden ? <TabsTrigger value="smart" className="gap-1.5 border border-primary/30 text-xs" ><Sparkles className="size-3.5" /> تحلیل تخصصی: {smart.analysis.templateLabel}</TabsTrigger> : null}
         </TabsList>
 
@@ -704,12 +779,89 @@ export default function AutoDashboardView({ datasetId, datasetName, canEdit, onD
             />
           ) : null}
         </TabsContent>
+
+        {/* ── گزارش چاپی هوشمند — همان خروجی فایل HTML مستقل، درون‌برنامه‌ای و آماده چاپ ── */}
+        <TabsContent value="report" className="space-y-4">
+          <SmartReportView
+            dash={dash}
+            datasetName={datasetName}
+            dataVersion={dataVersion}
+            columnCount={columnCount}
+            canExportHtml
+            datasetId={datasetId}
+          />
+        </TabsContent>
       </Tabs>
 
       <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
         <Sparkles className="size-3" />
         این داشبورد به‌صورت خودکار از ساختار داده ساخته شده است — می‌توانید چیدمان را ویرایش کنید یا برای کنترل کامل از «گزارش‌ساز» (گام ۶) استفاده کنید.
       </p>
+
+      {/* ── گفت‌وگوی ذخیره به‌عنوان گزارش + لینک عمومی ── */}
+      <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Share2 className="size-4 text-primary" /> ذخیره داشبورد هوشمند به‌عنوان گزارش
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-6">
+              داشبورد با چیدمان فعلی به‌عنوان گزارش در پروژه ذخیره می‌شود؛ اگر پیش‌تر ذخیره شده باشد، نسخه جدیدی ثبت می‌گردد و تاریخچه نسخه‌ها حفظ می‌شود (بخش ۲۶.۱ سند).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="saverep-title" className="text-xs">عنوان گزارش</Label>
+              <Input id="saverep-title" value={saveTitle} onChange={e => setSaveTitle(e.target.value)} placeholder="مثلاً: گزارش فروش مهر و آبان" className="h-8 text-xs" />
+            </div>
+            {canSubmitReport ? (
+              <label className="flex cursor-pointer items-center gap-2 text-xs leading-5">
+                <Checkbox checked={saveSubmit} onCheckedChange={v => setSaveSubmit(v === true)} />
+                پس از ذخیره، برای تأیید ارسال شود (گردش کار: پیش‌نویس → در انتظار تأیید)
+              </label>
+            ) : null}
+            {canPublishReport ? (
+              <label className="flex cursor-pointer items-center gap-2 text-xs leading-5">
+                <Checkbox checked={savePublish} onCheckedChange={v => setSavePublish(v === true)} />
+                انتشار فوری (اختیار مدیر سامانه) — زنجیره کامل تأیید به‌صورت خودکار ثبت می‌شود
+              </label>
+            ) : null}
+            {savedInfo ? (
+              <Alert className="border-emerald-300 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/30">
+                <CheckCircle2 className="size-4 text-emerald-600" />
+                <AlertTitle className="text-xs text-emerald-700 dark:text-emerald-300">
+                  ذخیره شد — {savedInfo.created ? 'گزارش جدید ایجاد شد' : `نسخه ${fa(savedInfo.version)} ثبت شد`} | وضعیت: {STATUS_FA[savedInfo.status] ?? savedInfo.status}
+                </AlertTitle>
+                <AlertDescription className="space-y-2 text-[11px] leading-5 text-emerald-800 dark:text-emerald-400">
+                  <p>گزارش «{savedInfo.title}» در تب «گزارش‌ها» (گام ۶) قابل مدیریت، انتشار و خروجی‌گیری است.</p>
+                  {savedInfo.status === 'published' ? (
+                    sharePath ? (
+                      <div className="flex items-center gap-1.5">
+                        <Input readOnly value={sharePath} dir="ltr" onFocus={e => e.currentTarget.select()} className="h-7 flex-1 bg-white text-left font-mono text-[10px]" />
+                        <Tip label="کپی لینک عمومی برای اشتراک‌گذاری" side="top">
+                          <Button size="icon" variant="outline" className="size-7" onClick={() => { navigator.clipboard?.writeText(window.location.origin + sharePath) }} aria-label="کپی لینک"><Copy className="size-3" /></Button>
+                        </Tip>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={issueShareLink} disabled={shareLoading}>
+                        {shareLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Link2 className="size-3.5" />} صدور لینک عمومی اشتراک (بدون نیاز به ورود)
+                      </Button>
+                    )
+                  ) : (
+                    <p className="text-amber-700 dark:text-amber-400">برای صدور لینک عمومی، گزارش باید «منتشرشده» شود؛ پس از تأیید، لینک از همین گفت‌وگو یا تب گزارش‌ها قابل صدور است.</p>
+                  )}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" className="text-xs" onClick={() => setSaveOpen(false)}>بستن</Button>
+            <Button size="sm" className="gap-1.5 text-xs" onClick={saveAsReport} disabled={savingReport || !saveTitle.trim()}>
+              {savingReport ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} ذخیره گزارش
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

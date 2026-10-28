@@ -31,6 +31,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       dashboard: applyLayout(dash, layout),
       raw: dash, // نسخه بدون چیدمان برای بازگردانی پیش‌فرض در ویرایشگر
       layout,
+      dataVersion: ds.version,
+      columnCount: visibleFields.length,
       effectiveFields: visibleFields.filter(f => visibleIds.has(f.id)).length,
       maskedForRole: user.role !== 'admin' && fields.some(f => f.sensitivity === 'confidential'),
     })
