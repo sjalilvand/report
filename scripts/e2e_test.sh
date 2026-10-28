@@ -1540,5 +1540,153 @@ d=json.load(sys.stdin)
 assert 'error' in d, 'بدون ستون معتبر باید خطا برگردد'
 print('✓ پیام خطای شفاف:', d['error'][:60])"
 
+# ————————————————————————————————————————————————————————————————
+# فاز ۴۲ — موتور تحلیل متوسط DuckDB و فایل آماده‌شده Parquet (بخش ۲۷.۲ سند)
+# ————————————————————————————————————————————————————————————————
 echo ""
-echo "✓✓✓ هر ۴۱ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"
+echo "═══ ۴۲) موتور تحلیل متوسط DuckDB و فایل آماده‌شده Parquet (۲۷.۲) ═══"
+
+echo "── ۴۲.۱) وضعیت موتور — دسترس‌پذیری بسته و تنظیم مدیر ──"
+$CURL "$BASE/datasets/$DSID/parquet" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['engineAvailable'] is True, 'موتور DuckDB باید در دسترس باشد (بسته نصب شده است)'
+assert d['engineSetting'] in ('internal','duckdb'), 'تنظیم engineAnalytics نامعتبر'
+print('✓ موتور DuckDB فعال و شناسایی شد | انتخاب مدیر:', d['engineSetting'])"
+
+echo "── ۴۲.۲) ساخت فایل Parquet نسخه جاری ──"
+$CURL -X POST "$BASE/datasets/$DSID/parquet" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' not in d, 'ساخت Parquet ناموفق: '+str(d.get('error'))
+assert d['rows'] > 0 and d['bytes'] > 0 and d['columns'] > 0, 'فایل Parquet خالی است'
+print(f\"✓ فایل Parquet ساخته شد — نسخه {d['version']}، {d['rows']} رکورد، {d['columns']} ستون، {d['bytes']} بایت در {d['tookMs']} میلی‌ثانیه\")"
+
+echo "── ۴۲.۳) پرس‌وجوی شمارش — COUNT روی نمای ds ──"
+ROWCNT=$($CURL "$BASE/datasets/$DSID" | python3 -c "import json,sys; print(json.load(sys.stdin)['rowCount'])")
+$CURL -X POST "$BASE/datasets/$DSID/duck" -H 'Content-Type: application/json' -d '{"sql":"SELECT COUNT(*) AS \"تعداد\" FROM ds"}' | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' not in d, 'خطای پرس‌وجو: '+str(d.get('error'))
+v=d['rows'][0][0]
+assert v == $ROWCNT, f\"شمارش DuckDB ({v}) با رکوردهای مجموعه‌داده ($ROWCNT) یکی نیست\"
+assert d['columns'] == ['تعداد'], 'نام ستون استخراج نشد: '+str(d['columns'])
+print('✓ COUNT =', v, '— هم‌خوان با rowCount مجموعه‌داده؛ استخراج نام ستون‌ها درست است')"
+
+echo "── ۴۲.۴) تجمیع گروهی DuckDB — تطابق با موتور داخلی ──"
+# فیلدهای نسخه جاری مجموعه‌داده (پس از تبدیل‌های فازهای قبل) — نخستین بُعد و نخستین سنجه
+CURFIELDS=$($CURL "$BASE/datasets/$DSID" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+dims=[f for f in d['fields'] if f.get('role')=='dimension']
+ms=[f for f in d['fields'] if f.get('role')=='measure']
+assert dims and ms, 'فیلد بُعد و سنجه در نسخه جاری لازم است'
+print(json.dumps({'dimId': dims[0]['id'], 'dimLabel': dims[0].get('label') or dims[0]['id'], 'mId': ms[0]['id'], 'mLabel': ms[0].get('label') or ms[0]['id']}, ensure_ascii=False))")
+DIM_ID=$(echo "$CURFIELDS" | python3 -c "import json,sys; print(json.load(sys.stdin)['dimId'])")
+DIM_LB=$(echo "$CURFIELDS" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['dimLabel'], ensure_ascii=False))")
+MEAS_ID=$(echo "$CURFIELDS" | python3 -c "import json,sys; print(json.load(sys.stdin)['mId'])")
+MEAS_LB=$(echo "$CURFIELDS" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['mLabel'], ensure_ascii=False))")
+INNER=$($CURL -X POST "$BASE/datasets/$DSID/query" -H 'Content-Type: application/json' -d "{\"dimensions\":[\"$DIM_ID\"],\"measures\":[{\"fieldId\":\"$MEAS_ID\",\"agg\":\"sum\",\"alias\":\"S\"}]}" | DIM_ID="$DIM_ID" python3 -c "
+import json,sys,os
+d=json.load(sys.stdin)
+prov=os.environ['DIM_ID']
+print(json.dumps({str(r[prov]): r['S'] for r in d['rows']}, ensure_ascii=False))")
+BODY42=$(DIM_LB="$DIM_LB" MEAS_LB="$MEAS_LB" python3 -c "
+import json,os
+prov=json.loads(os.environ['DIM_LB']); amt=json.loads(os.environ['MEAS_LB'])
+print(json.dumps({'sql': 'SELECT \"' + prov + '\" AS g, SUM(\"' + amt + '\") AS S FROM ds GROUP BY 1 ORDER BY 2 DESC LIMIT 20'}, ensure_ascii=False))")
+$CURL -X POST "$BASE/datasets/$DSID/duck" -H 'Content-Type: application/json' -d "$BODY42" | INNER="$INNER" python3 -c "
+import json,sys,os
+d=json.load(sys.stdin)
+assert 'error' not in d, 'خطای پرس‌وجوی گروهی: '+str(d.get('error'))
+inner=json.loads(os.environ['INNER'])
+got={str(r[0]): r[1] for r in d['rows']}
+assert set(got) == set(inner), 'گروه‌ها یکی نیست: '+str(sorted(map(str,got)))+' != '+str(sorted(map(str,inner)))
+for k,v in got.items():
+    assert abs(v-inner[k]) < 1e-6, f'جمع «{k}» ناسازگار: {v} != {inner[k]}'
+print('✓ تجمیع گروهی DuckDB با موتور داخلی برابر است —', len(got), 'گروه')"
+
+echo "── ۴۲.۵) محافظت SQL — فقط پرس‌وجوی خواندنی تک‌دستوری (بخش ۲۹) ──"
+for BAD in "INSERT INTO ds VALUES (1)" "COPY ds TO '/tmp/x.parquet'" "ATTACH 'x.db' AS x" "SELECT 1; DROP TABLE ds" "SELECT * FROM read_parquet('/etc/passwd')" "SET enable_external_access=true" "DROP TABLE ds"; do
+  $CURL -X POST "$BASE/datasets/$DSID/duck" -H 'Content-Type: application/json' -d "{\"sql\":\"$BAD\"}" | BAD="$BAD" python3 -c "
+import json,sys,os
+d=json.load(sys.stdin)
+assert 'error' in d, 'پرس‌وجوی ممنوعه باید رد شود: ' + os.environ['BAD']
+print('✓ رد شد:', d['error'][:58])"
+done
+
+echo "── ۴۲.۶) وضعیت پس از ساخت — هم‌خوانی نسخه ──"
+$CURL "$BASE/datasets/$DSID/parquet" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+p=d['parquet']
+assert p is not None and p['stale'] is False, 'فایل باید موجود و به‌روز باشد'
+assert p['version'] == d['datasetVersion'], 'نسخه فایل با نسخه مجموعه‌داده یکی نیست'
+print('✓ فایل Parquet موجود، به‌روز و هم‌خوان با نسخه', d['datasetVersion'])"
+
+# ————————————————————————————————————————————————————————————————
+# فاز ۴۳ — ورود یکپارچه سازمانی SAML 2.0 (بخش ۲۹ سند)
+# ————————————————————————————————————————————————————————————————
+echo ""
+echo "═══ ۴۳) ورود یکپارچه سازمانی SAML 2.0 (۲۹) ═══"
+
+echo "── ۴۳.۱) وضعیت پیش‌فرض — غیرفعال ──"
+SAML_ST=$($CURL "$BASE/auth/saml/status")
+echo "$SAML_ST" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['enabled'] is False, 'SAML باید پیش‌فرض غیرفعال باشد'
+print('✓ SAML پیش‌فرض غیرفعال است')"
+
+echo "── ۴۳.۲) فعال‌سازی با پیکربندی آزمون IdP ──"
+# گواهی فراسازمانی آزمون — فقط برای بررسی ساخت پیکربندی و امضای ردشده
+CERT=$(openssl req -x509 -newkey rsa:2048 -keyout /tmp/e2e_idp.key -out /tmp/e2e_idp.crt -days 2 -nodes -subj "/CN=e2e-idp.example.com" 2>/dev/null && openssl x509 -in /tmp/e2e_idp.crt -outform DER 2>/dev/null | base64 -w 0)
+CERT_BODY=$($CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d "{\"samlEnabled\":true,\"samlIdpSsoUrl\":\"https://idp.example.com/saml/sso\",\"samlIdpCert\":\"$CERT\",\"samlAutoProvision\":true,\"samlDefaultRole\":\"viewer\"}" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'error' not in d, str(d); print('OK')")
+echo "$CERT_BODY" | rg -q OK && echo "✓ پیکربندی SAML ذخیره شد (Entry Point + گواهی X.509 + سیاست ساخت خودکار)"
+$CURL "$BASE/auth/saml/status" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['enabled'] is True, 'SAML باید پس از پیکربندی فعال شود'
+print('✓ وضعیت SAML: فعال')"
+
+echo "── ۴۳.۳) شروع ورود — ریدایرکت به IdP با SAMLRequest ──"
+$CURL -D /tmp/saml_login_headers.txt -o /dev/null "$BASE/auth/saml/login"
+LOC=$(rg -i '^location:' /tmp/saml_login_headers.txt | head -1 | tr -d '\r' | sed 's/^[Ll]ocation: //')
+echo "$LOC" | python3 -c "
+import sys, urllib.parse
+loc=sys.stdin.read().strip()
+assert loc.startswith('https://idp.example.com'), 'ریدایرکت باید به IdP باشد: '+loc
+assert 'SAMLRequest=' in loc, 'درخواست SAML در آدرس نیست'
+q=urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
+import base64, zlib
+req=zlib.decompress(base64.b64decode(q['SAMLRequest'][0]), -15).decode()
+assert 'AuthnRequest' in req and 'AssertionConsumerService' in req.replace(' ',''), 'ساختار AuthnRequest نادرست'
+print('✓ AuthnRequest معتبر با Redirect Binding ساخته شد — ACS در درخواست حاضر است')"
+
+echo "── ۴۳.۴) SP Metadata برای ثبت در IdP ──"
+$CURL "$BASE/auth/saml/metadata" | python3 -c "
+import sys
+xml=sys.stdin.read()
+assert xml.strip().startswith('<?xml'), 'خروجی metadata باید XML باشد'
+assert 'entityID' in xml and 'AssertionConsumerService' in xml, 'عناصر اصلی metadata ناقص است'
+assert '/api/auth/saml/acs' in xml, 'آدرس ACS باید در metadata باشد'
+print('✓ SP Metadata معتبر (entityID + ACS) برای ثبت در IdP سازمان')"
+
+echo "── ۴۳.۵) ACS — پاسخ دستکاری‌شده/بی‌امضا رد می‌شود ──"
+$CURL -D - -o /dev/null -X POST "$BASE/auth/saml/acs" -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "SAMLResponse=$(echo 'پاسخ جعلی' | base64 -w 0)" | python3 -c "
+import sys
+head=sys.stdin.read()
+assert 'HTTP/1.1 302' in head or 'HTTP/1.1 307' in head or '302' in head.split(chr(10))[0], 'ACS باید ریدایرکت خطا بدهد'
+assert 'samlError=' in head, 'پیام خطا در ریدایرکت نیست'
+print('✓ پاسخ بی‌امضا رد شد — خطا به صفحه ورود بازگردانده شد (اعتبارسنجی امضا فعال)')"
+
+echo "── ۴۳.۶) غیرفعال‌سازی و بازگشت به حالت امن ──"
+$CURL -X PUT "$BASE/settings" -H 'Content-Type: application/json' -d '{"samlEnabled":false}' > /dev/null
+$CURL "$BASE/auth/saml/status" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['enabled'] is False, 'SAML باید غیرفعال شده باشد'
+print('✓ SAML غیرفعال شد — دکمه ورود سازمانی از صفحه ورود حذف می‌شود')"
+
+echo ""
+echo "✓✓✓ هر ۴۳ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"

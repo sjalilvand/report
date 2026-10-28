@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -31,8 +32,12 @@ interface UserRow {
 interface RowRuleDTO { datasetId: string; fieldId: string; op: string; value?: string; values?: string[] }
 interface SettingsRow { settings: Record<string, string | number | boolean>; labels: Record<string, string> }
 
-// تنظیمات چندگزینه‌ای — گزینه‌های مجاز (بخش ۱۳.۲ سند: روش صدک، نوع انحراف معیار، رفتار خالی)
+// تنظیمات چندگزینه‌ای — گزینه‌های مجاز (بخش ۱۳.۲ و ۲۷.۲ سند)
 const SETTING_ENUMS: Record<string, { value: string; label: string }[]> = {
+  engineAnalytics: [
+    { value: 'internal', label: 'موتور داخلی (TypeScript)' },
+    { value: 'duckdb', label: 'DuckDB + فایل آماده‌شده Parquet' },
+  ],
   statPercentileMethod: [
     { value: 'linear', label: 'درون‌یابی خطی (R-7)' },
     { value: 'nearest', label: 'نزدیک‌ترین رتبه' },
@@ -47,6 +52,9 @@ const SETTING_ENUMS: Record<string, { value: string; label: string }[]> = {
   ],
 }
 interface SchedulerStatus { running: boolean; intervalMinutes: number; startedAt: string | null; lastRunAt: string | null; lastRunProjects: number; lastRunEvaluated: number; lastRunCreated: number; lastEmailSent: boolean; lastConnSync?: number; lastConnSyncFailed?: number; lastError: string | null }
+
+// فیلدهای چندسطری تنظیمات — گواهی X.509 سامانه هویتی SAML
+const SETTING_MULTILINE = new Set(['samlIdpCert'])
 interface HealthStatus { status: string; uptimeSec: number; checks: { database: { status: string }; scheduler: { running: boolean; lastRunAt: string | null }; queue: { running: number; queued: number; lastFinishedAt: string | null; lastError: string | null } } }
 interface AuditRow { id: string; action: string; detail?: string | null; actor?: string | null; createdAt: string; projectId?: string | null }
 interface DatasetLite { id: string; name: string; fields: string }
@@ -303,6 +311,21 @@ export default function AdminView({ canManageUsers, canManageSettings, canViewAu
                             {enumOpts.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                           </SelectContent>
                         </Select>
+                      </div>
+                    )
+                  }
+                  // فیلدهای چندسطری (گواهی SAML) — بخش ۲۹ سند
+                  if (SETTING_MULTILINE.has(key) && typeof val === 'string') {
+                    return (
+                      <div key={key} className="space-y-1.5 md:col-span-2 lg:col-span-3">
+                        <Label className="text-xs">{label}</Label>
+                        <Textarea
+                          dir="ltr"
+                          rows={4}
+                          value={val}
+                          onChange={e => setSettings({ ...settings, settings: { ...settings.settings, [key]: e.target.value } })}
+                          className="font-mono text-[10px] leading-4"
+                        />
                       </div>
                     )
                   }

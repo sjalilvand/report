@@ -24,6 +24,7 @@ import DataDictionaryView from '@/components/DataDictionaryView'
 import AlertsView from '@/components/AlertsView'
 import OccasionsView from '@/components/OccasionsView'
 import AiAssistantView from '@/components/AiAssistantView'
+import EngineView from '@/components/EngineView'
 import ConnectionsView from '@/components/ConnectionsView'
 import JobsView from '@/components/JobsView'
 import AccountSecurity from '@/components/AccountSecurity'
@@ -33,7 +34,7 @@ import LoginView, { AppUser } from '@/components/LoginView'
 import { TransformStep } from '@/lib/types'
 import {
   FolderKanban, Database, Columns3, Gauge, Wand2, Boxes, BarChart3,
-  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked, BellRing, CalendarDays, PlugZap, ListTodo, TrendingUp,
+  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked, BellRing, CalendarDays, PlugZap, ListTodo, TrendingUp, DatabaseZap,
 } from 'lucide-react'
 
 interface Project { id: string; name: string; description?: string | null; owner?: string | null; domain?: string | null }
@@ -57,7 +58,7 @@ interface DatasetDetail extends Omit<DatasetRow, 'fields' | 'transforms'> {
   transforms: TransformStep[]
 }
 
-type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'analytics' | 'assistant' | 'relations' | 'dictionary' | 'occasions' | 'connections' | 'reports' | 'jobs' | 'alerts' | 'admin'
+type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'analytics' | 'engine' | 'assistant' | 'relations' | 'dictionary' | 'occasions' | 'connections' | 'reports' | 'jobs' | 'alerts' | 'admin'
 
 export default function Home() {
   const [project, setProject] = useState<Project | null>(null)
@@ -218,6 +219,8 @@ export default function Home() {
               <TabsTrigger value="model" className="gap-1.5 text-xs" disabled={!detail}><Boxes className="size-3.5" /> مدل و شاخص‌ها</TabsTrigger>
               {/* تحلیل‌های پیشرفته — بخش ۲۱.۲ سند */}
               <TabsTrigger value="analytics" className="gap-1.5 text-xs" disabled={!detail}><TrendingUp className="size-3.5" /> تحلیل پیشرفته</TabsTrigger>
+              {/* موتور تحلیل متوسط DuckDB/Parquet — بخش ۲۷.۲ سند */}
+              <TabsTrigger value="engine" className="gap-1.5 text-xs" disabled={!detail}><DatabaseZap className="size-3.5" /> موتور تحلیلی</TabsTrigger>
               {/* دستیار هوشمند — بخش ۲۵ سند */}
               <TabsTrigger value="assistant" className="gap-1.5 text-xs" disabled={!detail}><Sparkles className="size-3.5" /> دستیار هوشمند</TabsTrigger>
               <TabsTrigger value="relations" className="gap-1.5 text-xs" disabled={datasets.length < 2}><Network className="size-3.5" /> روابط جداول</TabsTrigger>
@@ -351,6 +354,18 @@ export default function Home() {
               desc="روند و پیش‌بینی سری زمانی، گروه‌های زمانی (Cohort) و حفظ مخاطبان، بخش‌بندی و RFM، سناریوسازی (What-if)، همبستگی و تشخیص ناهنجاری — همراه با روش، خطای ارزیابی و عدم قطعیت (بخش‌های ۲۱.۲ و ۲۱.۳ سند)"
             />
             <AnalyticsView datasetId={detail.id} fields={fields} />
+          </div>
+        )}
+
+        {/* موتور تحلیل متوسط DuckDB/Parquet — بخش ۲۷.۲ سند */}
+        {tab === 'engine' && detail && (
+          <div className="space-y-4">
+            <SectionHead
+              icon={<DatabaseZap className="size-4" />}
+              title="موتور تحلیل متوسط و فایل آماده‌شده"
+              desc="ساخت فایل آماده‌شده Parquet از نسخه جاری مجموعه‌داده و پرس‌وجوی فقط‌خواندنی با موتور تحلیلی DuckDB — گزینه فناوری بخش ۲۷.۲ سند که پس از آزمون با فایل‌های واقعی سازمان نهایی می‌شود"
+            />
+            <EngineView datasetId={detail.id} datasetName={detail.name} />
           </div>
         )}
 

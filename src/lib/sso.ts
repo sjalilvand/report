@@ -157,8 +157,12 @@ export function extractIdentity(claims: Record<string, unknown>): SsoIdentity | 
   return { sub, email, name }
 }
 
-/** یافتن یا ساخت کاربر متناظر — اتصال حساب موجود با ssoSubject یا ساخت خودکار بر اساس سیاست */
-export async function resolveSsoUser(identity: SsoIdentity, cfg: SsoConfig): Promise<{ ok: true; userId: string } | { ok: false; message: string }> {
+/** یافتن یا ساخت کاربر متناظر — اتصال حساب موجود با ssoSubject یا ساخت خودکار بر اساس سیاست
+ *  سیاست مشترک SSO/OIDC و SAML — بخش ۲۹ سند */
+export async function resolveSsoUser(
+  identity: SsoIdentity,
+  cfg: Pick<SsoConfig, 'autoProvision' | 'defaultRole' | 'allowedDomain'>
+): Promise<{ ok: true; userId: string } | { ok: false; message: string }> {
   // محدودیت دامنه ایمیل — بخش ۲۹ (کنترل دسترسی)
   if (cfg.allowedDomain) {
     const domain = identity.email.split('@')[1] ?? ''

@@ -40,6 +40,15 @@ export interface PlatformSettings {
   ssoAutoProvision: boolean    // ساخت خودکار حساب برای کاربران جدید سازمان
   ssoDefaultRole: string       // نقش حساب‌های خودکار
   ssoAllowedDomain: string     // محدودیت دامنه ایمیل (خالی = بدون محدودیت)
+  // ورود یکپارچه سازمانی SAML 2.0 — بخش ۲۹ سند (مکمل OIDC)
+  samlEnabled: boolean
+  samlIdpSsoUrl: string        // آدرس Single Sign-On سامانه هویتی (Entry Point)
+  samlIdpCert: string          // گواهی X.509 عمومی IdP برای اعتبارسنجی امضا (PEM)
+  samlIssuer: string           // EntityID سمت SP (خالی = آدرس metadata همین سامانه)
+  samlIdpEntityId: string      // EntityID انتظاری IdP (اختیاری)
+  samlAutoProvision: boolean   // ساخت خودکار حساب برای کاربران جدید سازمان
+  samlDefaultRole: string      // نقش حساب‌های خودکار
+  samlAllowedDomain: string    // محدودیت دامنه ایمیل (خالی = بدون محدودیت)
   // صف پردازش خروجی حجیم — بخش ۲۸ (Job/Export) و ۳۰.۲ (پایداری)
   exportQueueConcurrency: number // تعداد پردازش هم‌زمان صف خروجی
   exportFileTtlHours: number   // مدت اعتبار فایل خروجی و لینک دانلود — ابطال خودکار
@@ -51,6 +60,8 @@ export interface PlatformSettings {
   statPercentileMethod: string // روش صدک/چارک: linear (درون‌یابی خطی R-7) یا nearest (نزدیک‌ترین رتبه)
   statStdDevDefault: string    // نوع پیش‌فرض انحراف معیار و واریانس: sample (n−۱) یا population (n)
   statNullBehavior: string     // رفتار داده خالی در محاسبات آماری: exclude یا zero
+  // موتور تحلیل متوسط — بخش ۲۷.۲ سند (گزینه فناوری: DuckDB یا موتور داخلی)
+  engineAnalytics: string      // internal (موتور داخلی) یا duckdb (DuckDB + فایل آماده‌شده Parquet)
 }
 
 // اهداف پیشنهادی اولیه سند — مشروط به آزمون با داده واقعی سازمان (بخش ۳۰.۱ و ۳۷)
@@ -87,6 +98,14 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   ssoAutoProvision: false,
   ssoDefaultRole: 'viewer',
   ssoAllowedDomain: '',
+  samlEnabled: false,
+  samlIdpSsoUrl: '',
+  samlIdpCert: '',
+  samlIssuer: '',
+  samlIdpEntityId: '',
+  samlAutoProvision: false,
+  samlDefaultRole: 'viewer',
+  samlAllowedDomain: '',
   exportQueueConcurrency: 1,
   exportFileTtlHours: 48,
   aiEnabled: true,
@@ -95,6 +114,7 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   statPercentileMethod: 'linear',
   statStdDevDefault: 'sample',
   statNullBehavior: 'exclude',
+  engineAnalytics: 'internal',
 }
 
 export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
@@ -130,6 +150,14 @@ export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
   ssoAutoProvision: 'ساخت خودکار حساب کاربران جدید سازمان',
   ssoDefaultRole: 'نقش پیش‌فرض حساب‌های خودکار',
   ssoAllowedDomain: 'محدودیت دامنه ایمیل (خالی = بدون محدودیت)',
+  samlEnabled: 'ورود یکپارچه سازمانی SAML 2.0 (بخش ۲۹)',
+  samlIdpSsoUrl: 'آدرس Single Sign-On سامانه هویتی (Entry Point)',
+  samlIdpCert: 'گواهی X.509 عمومی IdP (PEM — چندسطری)',
+  samlIssuer: 'EntityID سمت SP (خالی = آدرس metadata همین سامانه)',
+  samlIdpEntityId: 'EntityID سامانه هویتی (اختیاری)',
+  samlAutoProvision: 'ساخت خودکار حساب کاربران جدید سازمان (SAML)',
+  samlDefaultRole: 'نقش پیش‌فرض حساب‌های خودکار (SAML)',
+  samlAllowedDomain: 'محدودیت دامنه ایمیل SAML (خالی = بدون محدودیت)',
   exportQueueConcurrency: 'تعداد پردازش هم‌زمان صف خروجی',
   exportFileTtlHours: 'مدت اعتبار فایل خروجی (ساعت)',
   aiEnabled: 'دستیار هوشمند و هوش مصنوعی (بخش ۲۵)',
@@ -138,6 +166,7 @@ export const SETTING_LABELS: Record<keyof PlatformSettings, string> = {
   statPercentileMethod: 'روش صدک و چارک (بخش ۱۳.۲)',
   statStdDevDefault: 'نوع پیش‌فرض انحراف معیار و واریانس (بخش ۱۳.۲)',
   statNullBehavior: 'رفتار داده‌های خالی در محاسبات آماری (بخش ۱۳.۲)',
+  engineAnalytics: 'موتور تحلیل متوسط (بخش ۲۷.۲)',
 }
 
 // فیلدهایی که در پاسخ GET ماسک می‌شوند — جلوگیری از نشت گذرواژه (بخش ۲۹)

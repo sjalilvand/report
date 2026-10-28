@@ -33,6 +33,7 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: (u: AppUser) => 
   const [mfaCode, setMfaCode] = useState('')
   // ورود سازمانی
   const [ssoEnabled, setSsoEnabled] = useState(false)
+  const [samlEnabled, setSamlEnabled] = useState(false)
   const [ssoError, setSsoError] = useState('')
 
   useEffect(() => {
@@ -40,9 +41,13 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: (u: AppUser) => 
     api.get<{ enabled: boolean }>('/api/auth/sso/status')
       .then(r => setSsoEnabled(r.enabled))
       .catch(() => undefined)
+    // وضعیت SAML — بخش ۲۹ سند
+    api.get<{ enabled: boolean }>('/api/auth/saml/status')
+      .then(r => setSamlEnabled(r.enabled))
+      .catch(() => undefined)
     // پیام خطای بازگشتی از callback سازمانی
     const params = new URLSearchParams(window.location.search)
-    const err = params.get('ssoError')
+    const err = params.get('ssoError') ?? params.get('samlError')
     if (err) setSsoError(err)
   }, [])
 
@@ -177,6 +182,27 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: (u: AppUser) => 
                   </Button>
                   <p className="text-[10px] text-muted-foreground text-center">
                     احراز هویت از طریق سامانه هویتی سازمان (OIDC) انجام می‌شود — بخش ۲۹ سند
+                  </p>
+                </>
+              )}
+
+              {/* ورود سازمانی SAML 2.0 — بخش ۲۹ سند */}
+              {samlEnabled && (
+                <>
+                  {!ssoEnabled && (
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <div className="h-px flex-1 bg-border" /> یا <div className="h-px flex-1 bg-border" />
+                    </div>
+                  )}
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2"
+                    onClick={() => { window.location.href = '/api/auth/saml/login' }}
+                  >
+                    <Building2 className="size-4" /> ورود با حساب سازمانی (SAML)
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground text-center">
+                    احراز هویت از طریق سامانه هویتی سازمان با استاندارد SAML 2.0 انجام می‌شود — بخش ۲۹ سند
                   </p>
                 </>
               )}

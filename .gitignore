@@ -78,3 +78,5 @@ next-test/
 
 # کش آزمون ایزوله Turbopack — فاز هشتم
 .next-test/
+# فایل آماده‌شده Parquet موتور تحلیلی — بخش ۲۷.۲
+/data

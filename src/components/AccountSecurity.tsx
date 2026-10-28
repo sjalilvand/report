@@ -145,7 +145,6 @@ export default function AccountSecurity({ user, onChanged }: { user: AccountInfo
             <div className="space-y-3">
               <div className="flex justify-center">
                 {/* تصویر QR تولیدشده سمت سرور (data URL) */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={setup.qr} alt="QR احرازکننده" className="rounded-lg border p-1.5 size-52" />
               </div>
               <div className="space-y-1.5">

@@ -66,9 +66,10 @@ export default function NotificationBell({ projectId }: { projectId: string }) {
   }, [projectId])
 
   useEffect(() => {
-    load()
+    // فراخوانی اولیه خارج از بدنه همگام effect — جلوگیری از رندر آبشاری (react-hooks/set-state-in-effect)
+    const t = setTimeout(load, 0)
     timer.current = setInterval(load, 45_000)
-    return () => { if (timer.current) clearInterval(timer.current) }
+    return () => { clearTimeout(t); if (timer.current) clearInterval(timer.current) }
   }, [load])
 
   const markRead = async (n: NotificationItem) => {

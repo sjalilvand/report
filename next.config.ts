@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   // distDir قابل تغییر برای اجرای موازی دو نمونه (آزمون خودکار) — پیش‌فرض .next
   distDir: process.env.NEXT_DIST_DIR || ".next",
   // کتابخانه‌های بومی/سنگین سمت سرور خارج از باندلر — پایداری Turbopack
-  serverExternalPackages: ["pptxgenjs", "@react-pdf/renderer", "nodemailer", "xlsx"],
+  serverExternalPackages: ["pptxgenjs", "@react-pdf/renderer", "nodemailer", "xlsx", "@duckdb/node-api", "@node-saml/node-saml"],
   /* config options here */
   typescript: {
     ignoreBuildErrors: true,
