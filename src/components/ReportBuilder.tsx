@@ -37,6 +37,7 @@ import {
 } from 'recharts'
 import { FieldMetaClient } from './ColumnsEditor'
 import { buildGeoPoints, IRAN_OUTLINE } from '@/lib/geo'
+import { Tip } from './HelpTip'
 
 // پیشنهاد نمودار هوشمند — بخش ۲۵ سند
 interface AiChartSuggestion {
@@ -1323,18 +1324,22 @@ export default function ReportBuilder({
                   </SelectContent>
                 </Select>
                 {/* پیشنهاد نمودار هوشمند — بخش ۲۵ */}
-                <Button
-                  variant="outline" onClick={applyAiSuggestion}
-                  disabled={aiSuggestLoading} className="h-8 gap-1.5 text-xs border-teal-300 text-teal-700 hover:bg-teal-50"
-                >
-                  {aiSuggestLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} پیشنهاد هوشمند (۲۵)
-                </Button>
-                <Button
-                  onClick={execute}
-                  disabled={loading || pivotLoading || dashLoading || specialLoading || qualityLoading} className="h-8 gap-1.5 text-xs"
-                >
-                  {loading || pivotLoading || dashLoading || specialLoading || qualityLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} اجرای گزارش
-                </Button>
+                <Tip label="بر اساس داده شما، پیکربندی مناسب (نوع نمایش، ابعاد و سنجه‌ها) پیشنهاد و اعمال می‌شود — سپس «اجرای گزارش» را بزنید">
+                  <Button
+                    variant="outline" onClick={applyAiSuggestion}
+                    disabled={aiSuggestLoading} className="h-8 gap-1.5 text-xs border-teal-300 text-teal-700 hover:bg-teal-50"
+                  >
+                    {aiSuggestLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} پیشنهاد هوشمند (۲۵)
+                  </Button>
+                </Tip>
+                <Tip label="گام ۴ از ۵ — اجرای پیکربندی فعلی؛ پس از هر تغییر در نوع نمایش، ابعاد، سنجه‌ها یا فیلترها دوباره بزنید">
+                  <Button
+                    onClick={execute}
+                    disabled={loading || pivotLoading || dashLoading || specialLoading || qualityLoading} className="h-8 gap-1.5 text-xs"
+                  >
+                    {loading || pivotLoading || dashLoading || specialLoading || qualityLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} اجرای گزارش
+                  </Button>
+                </Tip>
               </div>
             </div>
             <CardDescription>
@@ -2345,8 +2350,12 @@ export default function ReportBuilder({
                 <Label className="text-xs">عنوان گزارش برای ذخیره</Label>
                 <Input value={saveTitle} onChange={e => setSaveTitle(e.target.value)} placeholder="مثال: گزارش عملکرد فصلی" className="h-8" />
               </div>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport(false)}><Save className="size-3.5" /> ذخیره پیش‌نویس</Button>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport(true)}><Save className="size-3.5" /> ذخیره و ارسال برای تأیید</Button>
+              <Tip label="ذخیره به‌عنوان پیش‌نویس با نسخه‌بندی — فقط شما می‌بینید و بعداً قابل ویرایش است">
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport(false)}><Save className="size-3.5" /> ذخیره پیش‌نویس</Button>
+              </Tip>
+              <Tip label="ارسال به گردش کار تأیید (بخش ۲۶.۱) — پس از تأیید مدیر داده/سامانه گزارش منتشر می‌شود">
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => saveReport(true)}><Save className="size-3.5" /> ذخیره و ارسال برای تأیید</Button>
+              </Tip>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => exportReport('xlsx')} disabled={exporting || !result}>
@@ -2361,9 +2370,11 @@ export default function ReportBuilder({
               <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => exportReport('pdf')} disabled={exporting || !result}>
                 <FileText className="size-3.5" /> خروجی PDF
               </Button>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs border-dashed" onClick={() => queueExport('xlsx')} disabled={!result}>
-                <ListTodo className="size-3.5" /> خروجی پس‌زمینه (صف — حجم بالا)
-              </Button>
+              <Tip label="برای داده حجیم: تولید در پس‌زمینه با پیشرفت و لینک دانلود موقت — پیگیری از تب «پردازش‌ها» (بخش ۳۰.۲ سند)">
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs border-dashed" onClick={() => queueExport('xlsx')} disabled={!result}>
+                  <ListTodo className="size-3.5" /> خروجی پس‌زمینه (صف — حجم بالا)
+                </Button>
+              </Tip>
               <span className="text-[10px] text-muted-foreground self-center">
                 خروجی فیلترها، نسخه داده و زمان تولید را ثبت می‌کند؛ مجموع خروجی با گزارش منطبق است (بخش ۲۳.۲ سند). برای داده حجیم از «خروجی پس‌زمینه» استفاده کنید (بخش ۳۰.۲ سند).
               </span>

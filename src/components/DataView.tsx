@@ -17,6 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
 import { formatNumber } from '@/lib/currency'
+import { Tip } from './HelpTip'
 import {
   Upload, FileSpreadsheet, Trash2, Database, AlertTriangle, CheckCircle2, FileDown,
   Loader2, Table2, Eye, Layers, Info,
@@ -211,9 +212,11 @@ export default function DataView({
             )}
             <div>
               <p className="font-medium">فایل‌ها را اینجا رها کنید یا</p>
-              <Button variant="link" onClick={() => inputRef.current?.click()} className="px-0">
-                از رایانه انتخاب کنید
-              </Button>
+              <Tip label="گام ۱ از مسیر: فایل اکسل (XLSX/XLS/XLSM) یا CSV را انتخاب کنید — چند فایل هم‌زمان مجاز است">
+                <Button variant="link" onClick={() => inputRef.current?.click()} className="px-0">
+                  از رایانه انتخاب کنید
+                </Button>
+              </Tip>
             </div>
             <p className="text-xs text-muted-foreground">حفظ داده خام: فایل اصلی تغییر نمی‌کند و هر فایل با اثر انگشت محتوا ثبت می‌شود (بخش ۴ و ۷.۱ سند)</p>
             <input
