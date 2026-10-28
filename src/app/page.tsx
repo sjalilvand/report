@@ -19,6 +19,7 @@ import ProfileView from '@/components/ProfileView'
 import CleaningView from '@/components/CleaningView'
 import ModelView from '@/components/ModelView'
 import AnalyticsView from '@/components/AnalyticsView'
+import AutoDashboardView from '@/components/AutoDashboardView'
 import ReportBuilder from '@/components/ReportBuilder'
 import ReportWorkflow, { WorkflowUser } from '@/components/ReportWorkflow'
 import RelationsView from '@/components/RelationsView'
@@ -36,7 +37,7 @@ import LoginView, { AppUser } from '@/components/LoginView'
 import { TransformStep } from '@/lib/types'
 import {
   Database, Columns3, Gauge, Wand2, Boxes, BarChart3,
-  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked,
+  ScrollText, ArrowRight, Sparkles, FileCheck2, Network, ShieldCheck, LogOut, BookMarked, LayoutDashboard,
   BellRing, CalendarDays, PlugZap, ListTodo, TrendingUp, DatabaseZap,
   Menu, Compass, Lock, ChevronLeft, Route, ArrowLeft, type LucideIcon,
 } from 'lucide-react'
@@ -62,7 +63,7 @@ interface DatasetDetail extends Omit<DatasetRow, 'fields' | 'transforms'> {
   transforms: TransformStep[]
 }
 
-type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'analytics' | 'engine' | 'assistant' | 'relations' | 'dictionary' | 'occasions' | 'connections' | 'reports' | 'jobs' | 'alerts' | 'admin'
+type TabKey = 'projects' | 'data' | 'columns' | 'profile' | 'cleaning' | 'model' | 'autodash' | 'analytics' | 'engine' | 'assistant' | 'relations' | 'dictionary' | 'occasions' | 'connections' | 'reports' | 'jobs' | 'alerts' | 'admin'
 
 const fa = (n: number) => n.toLocaleString('fa-IR', { useGrouping: false })
 
@@ -115,6 +116,11 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: 'تحلیل و هوشمند',
     items: [
+      {
+        key: 'autodash', label: 'داشبورد هوشمند', icon: LayoutDashboard, lock: 'dataset',
+        chip: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300',
+        tip: 'پس از بارگذاری فایل، داشبورد و تحلیل‌ها به‌صورت خودکار ساخته می‌شوند: کارت شاخص، روند، تفکیک، بینش و جدول — با امکان ویرایش چیدمان',
+      },
       {
         key: 'analytics', label: 'تحلیل پیشرفته', icon: TrendingUp, lock: 'dataset',
         chip: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/60 dark:text-fuchsia-300',
@@ -230,6 +236,16 @@ const SECTION_GUIDES: Partial<Record<TabKey, { steps: GuideStep[]; tip?: string 
       { title: 'تکمیل مدل', desc: 'بازه‌بندی، فیلدهای مشتق‌شده و واحد مبالغ را تنظیم کنید.' },
     ],
     tip: 'مدل صحیح جلوی چندبرابرشدن مبالغ در روابط را می‌گیرد؛ پیش از گزارش‌سازی، «آزمون یکتایی» را سبز کنید.',
+  },
+  autodash: {
+    steps: [
+      { title: 'داشبورد خودکار آماده است', desc: 'پس از بارگذاری فایل، سامانه ستون‌های عددی، متنی و تاریخ را تشخیص می‌دهد و کارت شاخص، نمودار روند، تفکیک‌ها و بینش‌ها را بدون هیچ پیکربندی می‌سازد.' },
+      { title: 'مرور نمای کلی', desc: 'در تب «نمای کلی» کارت‌های شاخص رنگی، نمودار روند و ترکیب سهم را ببینید؛ چیپ‌های سبز/قرمز تغییر نسبت به دوره قبل را نشان می‌دهند.' },
+      { title: 'کاوش تحلیل‌ها', desc: 'تب «روند دوره‌ای» مقایسه ماه/فصل/سال، تب «تفکیک و ترکیب» نمودار هر گروه و تب «بینش‌های خودکار» یافته‌های مهم را به زبان فارسی روایت می‌کند.' },
+      { title: 'ویرایش چیدمان', desc: 'با دکمه «ویرایش داشبورد» کارت‌ها را مخفی/جابه‌جا کنید، نوع نمودار را عوض کنید و عنوان را تغییر دهید؛ سپس «ذخیره چیدمان» را بزنید.' },
+      { title: 'بازسازی پس از اصلاح', desc: 'اگر نوع ستون‌ها را در گام «ستون‌ها» اصلاح کردید، دکمه «بازسازی» داشبورد را با داده و انواع جدید دوباره می‌سازد.' },
+    ],
+    tip: 'این داشبورد نقطه شروع است؛ برای طراحی حرفه‌ای‌تر با فیلتر و چند نمای ترکیبی، از «گزارش‌ساز» (گام ۶) استفاده کنید.',
   },
   analytics: {
     steps: [
@@ -463,7 +479,7 @@ function AppNav({
 }
 
 // تب‌های وابسته به مجموعه‌داده فعال
-const NEEDS_DATASET: TabKey[] = ['columns', 'profile', 'cleaning', 'model', 'analytics', 'engine', 'assistant']
+const NEEDS_DATASET: TabKey[] = ['columns', 'profile', 'cleaning', 'model', 'autodash', 'analytics', 'engine', 'assistant']
 
 // ── نما وقتی مجموعه‌داده‌ای انتخاب نشده — به‌جای فضای خالی ──
 function NoDatasetState({ onGo }: { onGo: () => void }) {
@@ -782,7 +798,8 @@ export default function Home() {
                     await refreshDatasets()
                     setActiveDatasetId(id)
                     setDetail(null)
-                    setTab('columns')
+                    // تجربه هوشمند: پس از ایجاد مجموعه‌داده، مستقیماً داشبورد خودکار نمایش داده می‌شود
+                    setTab('autodash')
                   }}
                 />
                 {/* به‌روزرسانی فایل و Upsert — بخش ۲۴ سند */}
@@ -800,7 +817,7 @@ export default function Home() {
                       {datasets.map(d => (
                         <Tip key={d.id} label={`انتخاب «${d.name}» به‌عنوان نسخه فعال — سپس ستون‌ها، پروفایل و مدل‌سازی فعال می‌شوند`} side="top">
                           <button
-                            onClick={() => { setActiveDatasetId(d.id); setDetail(null); setTab('columns') }}
+                            onClick={() => { setActiveDatasetId(d.id); setDetail(null); setTab('autodash') }}
                             className={`card-lift text-right rounded-xl border p-4 ${activeDatasetId === d.id ? 'border-primary ring-2 ring-primary/30' : ''}`}
                           >
                             <div className="flex items-center justify-between gap-2">
@@ -888,6 +905,26 @@ export default function Home() {
                   grain={detail.grain ?? null}
                   records={detail.sample}
                   onChange={() => { refreshDetail(); refreshDatasets() }}
+                />
+              </div>
+            )}
+
+            {/* داشبورد هوشمند — تحلیل خودکار پس از بارگذاری اکسل */}
+            {tab === 'autodash' && detail && (
+              <div className="space-y-4">
+                {detail.status !== 'confirmed' ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300/60 bg-amber-50/70 px-4 py-2.5 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-300">
+                    <span>اگر نوع ستون‌ها هنوز تأیید نشده، تشخیص خودکار داشبورد بر پایه پیشنهاد اولیه است؛ برای دقت بیشتر گام ۲ (ستون‌ها) را بازبینی کنید.</span>
+                    <Button variant="outline" size="sm" className="shrink-0 gap-1 text-xs" onClick={() => setTab('columns')}>
+                      <Columns3 className="size-3.5" /> بازبینی ستون‌ها (گام ۲)
+                    </Button>
+                  </div>
+                ) : null}
+                <AutoDashboardView
+                  datasetId={detail.id}
+                  datasetName={detail.name}
+                  canEdit={true}
+                  onDatasetEdited={refreshDetail}
                 />
               </div>
             )}

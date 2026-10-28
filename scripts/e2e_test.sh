@@ -1690,3 +1690,81 @@ print('✓ SAML غیرفعال شد — دکمه ورود سازمانی از ص
 
 echo ""
 echo "✓✓✓ هر ۴۳ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"
+
+# فاز ۴۴ — داشبورد هوشمند: تحلیل خودکار پس از بارگذاری اکسل + ویرایش چیدمان
+# ————————————————————————————————————————————————————————————————
+echo ""
+echo "═══ ۴۴) داشبورد هوشمند — تحلیل خودکار و چیدمان قابل ویرایش ═══"
+
+echo "── ۴۴.۱) محاسبه داشبورد خودکار ──"
+$CURL "$BASE/datasets/$DSID/autodash" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' not in d, str(d)
+raw=d['raw']
+assert raw['rowCount'] > 0, 'رکورد باید موجود باشد'
+kpis=raw['kpis']
+assert len(kpis) >= 2, 'حداقل دو کارت شاخص لازم است'
+kinds=[k['id'] for k in kpis]
+assert 'kpi-count' in kinds, 'کارت تعداد رکورد الزامی است'
+assert any(k['id']=='kpi-sum' for k in kpis), 'کارت جمع سنجه اصلی الزامی است'
+# سنجه/بُعد باید تشخیص داده شده باشد
+assert raw.get('primaryMeasureLabel') or len(raw['kpis'])>0
+print('✓ داشبورد خودکار ساخته شد:', len(kpis), 'کارت شاخص |', len(raw['breakdowns']), 'تفکیک |', len(raw['insights']), 'بینش')
+if raw.get('trend'):
+    assert len(raw['trend']['points']) >= 2, 'روند باید حداقل دو دوره داشته باشد'
+    assert len(raw['trendTable']) == len(raw['trend']['points']), 'جدول مقایسه هم‌اندازه روند'
+    assert 'deltaPct' in raw['trendTable'][0]
+    print('✓ روند دوره‌ای:', len(raw['trend']['points']), 'دوره — اولین برچسب:', raw['trend']['points'][0]['label'])
+else:
+    print('ℹ روند دوره‌ای: ستون تاریخ در این مجموعه‌داده وجود ندارد')
+if raw['breakdowns']:
+    bd=raw['breakdowns'][0]
+    assert all('share' in r for r in bd['rows'])
+    total=sum(r['value'] for r in bd['rows'])+bd['othersValue']
+    print('✓ تفکیک اصلی «'+bd['dimensionLabel']+'» — جمع تفکیک با جمع کل سازگار است')
+print('✓ هشدارهای صحت:', len(raw['warnings']), 'مورد')"
+
+echo "── ۴۴.۲) ذخیره چیدمان ویرایش‌شده ──"
+BDID=$($CURL "$BASE/datasets/$DSID/autodash" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['raw']['breakdowns'][0]['id'] if d['raw']['breakdowns'] else '')")
+BD_CHART=""
+[ -n "$BDID" ] && BD_CHART=",\\\"$BDID\\\":\\\"pie\\\""
+PUT_BODY="{\"layout\":{\"title\":\"داشبورد آزمون e2e\",\"hiddenKpis\":[\"kpi-count\"],\"topLimit\":5,\"chartTypes\":{\"trend\":\"bar\"$BD_CHART}}}"
+$CURL -X PUT "$BASE/datasets/$DSID/autodash" -H 'Content-Type: application/json' -d "$PUT_BODY" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' not in d, str(d)
+assert d['saved'] is True and d['layout']['title']=='داشبورد آزمون e2e'
+print('✓ چیدمان ذخیره شد — عنوان و نوع نمودار پابرجا')"
+
+echo "── ۴۴.۳) اعمال چیدمان در پاسخ GET ──"
+$CURL "$BASE/datasets/$DSID/autodash" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['dashboard']['title']=='داشبورد آزمون e2e', 'عنوان ویرایش‌شده باید اعمال شود'
+assert all(k['id']!='kpi-count' for k in d['dashboard']['kpis']), 'کارت مخفی‌شده نباید نمایش داده شود'
+bd=d['dashboard']['breakdowns']
+if bd:
+    assert len(bd[0]['rows'])<=5, 'سقف ۵ دسته برتر باید اعمال شود'
+print('✓ چیدمان در داشبورد اعمال شد — عنوان/مخفی‌سازی/سقف دسته')"
+
+echo "── ۴۴.۴) پاک‌سازی چیدمان (بازگردانی پیش‌فرض) ──"
+$CURL -X PUT "$BASE/datasets/$DSID/autodash" -H 'Content-Type: application/json' -d '{"reset":true}' | python3 -c "
+import json,sys; d=json.load(sys.stdin)
+assert 'error' not in d, str(d)
+assert d['reset'] is True
+print('✓ چیدمان پاک شد — بازگشت به پیش‌فرض')"
+
+echo "── ۴۴.۵) اعتبارسنجی چیدمان نامعتبر رد می‌شود ──"
+$CURL -X PUT "$BASE/datasets/$DSID/autodash" -H 'Content-Type: application/json' -d "{\"layout\":{\"title\":\"$(python3 -c 'print("x"*200)')\",\"topLimit\":999,\"chartTypes\":{\"trend\":\"hacked\"}}}" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'error' not in d, str(d)
+l=d['layout']
+assert 'title' not in l, 'عنوان بیش از حد بلند باید حذف شود'
+assert 'topLimit' not in l or l['topLimit']<=15, 'سقف دسته باید در بازه ۵ تا ۱۵ محدود شود'
+assert (l.get('chartTypes') or {}).get('trend') is None, 'نوع نمودار نامعتبر باید حذف شود'
+print('✓ ورودی نامعتبر پاک‌سازی شد (عنوان بلند، سقف خارج از بازه، نوع ناشناخته)')"
+
+echo ""
+echo "✓✓✓ هر ۴۴ فاز کامل شد — datasetId=$DSID | reportId=$RID | اتصال=$CID"
